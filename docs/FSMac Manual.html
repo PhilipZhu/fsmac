@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FSMac Manual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a technical manual. Version band on top, then a sticky contents
+   rail beside a single reading column; reference material set as tables. */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ink: #15202a;
+  --muted: #586874;
+  --line: #d7dfe5;
+  --accent: #1c5bc9;
+  --accent-soft: #e5edfb;
+  --teal: #0f7f91;
+  --code-bg: #eef2f5;
+  --warn: #a8530f;
+  --warn-soft: #fbf0e4;
+  --ok: #2c7a47;
+  --ok-soft: #e6f3ea;
+
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --step--1: 0.8125rem;
+  --step-0: 1rem;
+  --step-1: 1.1875rem;
+  --step-2: 1.5rem;
+  --step-3: 2.125rem;
+  --step-4: 2.75rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e151b; --surface: #141e26; --ink: #e2e9ee; --muted: #94a4af; --line: #25323c;
+    --accent: #7aaeff; --accent-soft: #1a2a44; --teal: #4fc4d6; --code-bg: #1a252e;
+    --warn: #f0a160; --warn-soft: #2e2116; --ok: #6fcf8f; --ok-soft: #15291c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e151b; --surface: #141e26; --ink: #e2e9ee; --muted: #94a4af; --line: #25323c;
+  --accent: #7aaeff; --accent-soft: #1a2a44; --teal: #4fc4d6; --code-bg: #1a252e;
+  --warn: #f0a160; --warn-soft: #2e2116; --ok: #6fcf8f; --ok-soft: #15291c;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+img { max-width: 100%; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--step-0);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px;
+}
+code, kbd, pre { font-family: var(--font-mono); font-size: 0.9em; }
+code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 0.35em; background: var(--surface); }
+
+/* ---- Masthead ---------------------------------------------------------- */
+.masthead {
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  padding-block: 40px 28px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.masthead-inner { max-width: 1120px; margin: 0 auto; display: grid; gap: 14px; }
+.eyebrow {
+  font-family: var(--font-mono); font-size: var(--step--1); color: var(--teal);
+  letter-spacing: 0.04em;
+}
+.masthead h1 {
+  font-family: var(--font-display); font-stretch: 118%; font-weight: 800;
+  font-size: var(--step-4); line-height: 1.02; margin: 0; letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.masthead p.lede { margin: 0; max-width: 62ch; font-size: var(--step-1); color: var(--muted); }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 6px 0 0; padding: 0; list-style: none; }
+.facts li { display: flex; gap: 6px; align-items: baseline; font-size: var(--step--1); }
+.facts dt, .facts .k { color: var(--muted); }
+.facts .v { font-weight: 600; }
+
+/* ---- Page grid ----------------------------------------------------------- */
+.page {
+  max-width: 1120px; margin: 0 auto;
+  display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px;
+  padding-block: 32px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); align-self: start; max-height: calc(100vh - 32px); overflow: auto; }
+nav.toc details { border: 0; }
+nav.toc summary { list-style: none; font-family: var(--font-display); font-stretch: 110%; font-weight: 700; font-size: var(--step--1); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); cursor: default; margin-bottom: 8px; }
+nav.toc summary::-webkit-details-marker { display: none; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+nav.toc a {
+  display: block; padding: 4px 10px; border-left: 2px solid transparent;
+  color: var(--muted); text-decoration: none; font-size: 0.9rem; line-height: 1.35;
+}
+nav.toc a:hover { color: var(--ink); }
+nav.toc a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 500; }
+
+main { min-width: 0; max-width: 46rem; }
+section { padding-top: 8px; margin-bottom: 52px; }
+h2 {
+  font-family: var(--font-display); font-stretch: 112%; font-weight: 750;
+  font-size: var(--step-3); line-height: 1.1; margin: 0 0 14px; text-wrap: balance;
+}
+h3 {
+  font-family: var(--font-display); font-stretch: 106%; font-weight: 700;
+  font-size: var(--step-1); margin: 28px 0 8px; text-wrap: balance;
+}
+p, ul, ol, dl { margin: 0 0 14px; }
+ul, ol { padding-left: 1.3em; }
+li + li { margin-top: 4px; }
+.muted { color: var(--muted); }
+.small { font-size: var(--step--1); }
+
+/* Steps: a real sequence, so numbered. */
+ol.steps { counter-reset: step; list-style: none; padding: 0; display: grid; gap: 14px; }
+ol.steps > li { counter-increment: step; display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: 12px; margin: 0; }
+ol.steps > li::before {
+  content: counter(step); display: grid; place-items: center; width: 2rem; height: 2rem;
+  border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+  font-family: var(--font-display); font-weight: 750; font-size: 0.95rem;
+}
+ol.steps > li > div > :last-child { margin-bottom: 0; }
+ol.steps strong { display: block; }
+
+/* Notes */
+.note { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 12px 14px; margin: 0 0 16px; }
+.note.warn { background: var(--warn-soft); border-color: transparent; }
+.note.ok { background: var(--ok-soft); border-color: transparent; }
+.note > :last-child { margin-bottom: 0; }
+.note .label { font-family: var(--font-mono); font-size: var(--step--1); letter-spacing: 0.05em; text-transform: uppercase; display: block; margin-bottom: 2px; }
+.note.warn .label { color: var(--warn); }
+.note.ok .label { color: var(--ok); }
+
+/* Code blocks with copy buttons */
+.code { position: relative; margin: 0 0 16px; }
+.code pre {
+  margin: 0; background: var(--code-bg); border-radius: 8px; padding: 12px 14px;
+  overflow-x: auto; line-height: 1.5; font-size: 0.85rem; white-space: pre;
+}
+.code button.copy {
+  position: absolute; top: 6px; right: 6px; font: 500 0.75rem var(--font-body);
+  color: var(--muted); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 5px; padding: 2px 8px; cursor: pointer;
+}
+.code button.copy:hover { color: var(--ink); }
+.term .prompt { color: var(--muted); user-select: none; }
+.term .out { color: var(--muted); }
+
+/* Tables */
+.table-wrap { overflow-x: auto; margin: 0 0 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font-family: var(--font-display); font-stretch: 106%; font-weight: 700; font-size: var(--step--1); letter-spacing: 0.03em; color: var(--muted); background: var(--bg); white-space: nowrap; }
+td code { white-space: nowrap; }
+td.wrap code { white-space: normal; }
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* State chips mirror the menu bar's wording */
+.chip { display: inline-block; font-size: 0.78rem; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.chip.on { color: var(--accent); }
+.chip.ro { color: var(--warn); }
+.chip.off { color: var(--muted); }
+.chip.err { color: #c2352b; }
+:root[data-theme="dark"] .chip.err { color: #ff8a80; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.err { color: #ff8a80; } }
+
+/* Definition grid */
+dl.defs { display: grid; grid-template-columns: minmax(9rem, max-content) minmax(0, 1fr); gap: 8px 18px; }
+dl.defs dt { font-weight: 600; }
+dl.defs dd { margin: 0; color: var(--ink); }
+
+/* Troubleshooting */
+details.faq { border-top: 1px solid var(--line); padding: 10px 0; }
+details.faq:last-of-type { border-bottom: 1px solid var(--line); }
+details.faq summary { cursor: pointer; font-weight: 600; list-style: none; display: flex; gap: 10px; align-items: baseline; }
+details.faq summary::-webkit-details-marker { display: none; }
+details.faq summary::before { content: "+"; font-family: var(--font-mono); color: var(--accent); width: 1ch; flex: none; }
+details.faq[open] summary::before { content: "−"; }
+details.faq > div { padding: 8px 0 2px calc(1ch + 10px); }
+details.faq > div > :last-child { margin-bottom: 0; }
+
+/* Architecture diagram */
+figure.arch { margin: 0 0 18px; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr); gap: 24px; align-items: start; }
+.arch-main, .arch-side { display: grid; justify-items: stretch; min-width: 0; }
+.arch .box { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; background: var(--bg); text-align: center; font-weight: 600; font-size: 0.9rem; }
+.arch .box span { display: block; font-weight: 400; font-size: var(--step--1); color: var(--muted); }
+.arch .box.accent { border-color: var(--accent); background: var(--accent-soft); }
+.arch .box.mono { font-family: var(--font-mono); font-weight: 500; }
+.arch .link { position: relative; min-height: 26px; padding: 4px 0 4px 18px; margin-left: 50%; border-left: 2px solid var(--line);
+  font-size: var(--step--1); color: var(--muted); line-height: 1.3; }
+.arch .link::after { content: ""; position: absolute; left: -6px; bottom: -1px; border: 5px solid transparent; border-top: 6px solid var(--line); border-bottom: 0; }
+.arch .link.side { border-left-style: dashed; }
+@media (max-width: 640px) { figure.arch { grid-template-columns: minmax(0, 1fr); } }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 0 0 18px; }
+.stat { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: var(--surface); }
+.stat .n { font-family: var(--font-display); font-stretch: 112%; font-weight: 800; font-size: var(--step-2); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat .l { color: var(--muted); font-size: var(--step--1); }
+
+footer.end { border-top: 1px solid var(--line); padding-top: 18px; color: var(--muted); font-size: var(--step--1); }
+
+@media (max-width: 860px) {
+  .page { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 20px; }
+  nav.toc { position: static; max-height: none; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--surface); }
+  nav.toc summary { cursor: pointer; margin: 0; }
+  nav.toc summary::after { content: " ▾"; }
+  nav.toc details[open] summary { margin-bottom: 8px; }
+  .masthead { padding-block: 28px 22px; }
+  .masthead h1 { font-size: var(--step-3); }
+  h2 { font-size: var(--step-2); }
+}
+@media (max-width: 480px) {
+  dl.defs { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  dl.defs dd { margin-bottom: 10px; }
+}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="eyebrow">FSMac 1.0.2 · user and technical manual</div>
+    <h1>FSMac Manual</h1>
+    <p class="lede">FSMac lets a Mac read and write Windows (NTFS) and Linux (ext2, ext3, ext4) disks. Connect one and it appears in Finder, ready to use, and ejects like any other disk.</p>
+    <ul class="facts" aria-label="Product facts">
+      <li><span class="k">Formats</span><span class="v">NTFS · ext2 · ext3 · ext4</span></li>
+      <li><span class="k">Requires</span><span class="v">macOS 14 or later, Apple silicon</span></li>
+      <li><span class="k">Download</span><span class="v">FSMac-1.0.2.dmg, 4.5 MB</span></li>
+      <li><span class="k">License</span><span class="v">GNU GPL v2</span></li>
+    </ul>
+  </div>
+</header>
+
+<div class="page">
+  <nav class="toc" aria-label="Contents">
+    <details id="toc-details" open>
+      <summary>Contents</summary>
+      <ol>
+        <li><a href="#install">Install</a></li>
+        <li><a href="#everyday">Everyday use</a></li>
+        <li><a href="#menu">The menu bar window</a></li>
+        <li><a href="#tools">Check, repair, erase</a></li>
+        <li><a href="#settings">Settings</a></li>
+        <li><a href="#cli">Command line</a></li>
+        <li><a href="#ntfs">NTFS details</a></li>
+        <li><a href="#ext">ext2/3/4 details</a></li>
+        <li><a href="#limits">Limitations</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+        <li><a href="#how">How it works</a></li>
+        <li><a href="#files">Files and locations</a></li>
+        <li><a href="#quality">Testing and performance</a></li>
+        <li><a href="#build">Build from source</a></li>
+        <li><a href="#uninstall">Uninstall</a></li>
+        <li><a href="#license">License and credits</a></li>
+      </ol>
+    </details>
+  </nav>
+
+  <main>
+    <section id="install">
+      <h2>Install</h2>
+      <ol class="steps">
+        <li><div>
+          <strong>Copy the app</strong>
+          <p>Open <code>FSMac-1.0.0.dmg</code> and drag <b>FSMac</b> to <b>Applications</b>.</p>
+        </div></li>
+        <li><div>
+          <strong>Open FSMac</strong>
+          <p>A welcome window appears and a drive icon is added to the menu bar. If macOS says the app can't be opened because it is from an unidentified developer, Control-click FSMac in Applications, choose <b>Open</b>, then confirm. You only need to do this once.</p>
+        </div></li>
+        <li><div>
+          <strong>Install the helper</strong>
+          <p>Click <b>Install Helper</b>. The helper is a small background service that does the actual mounting, for every user of the Mac, including when the menu bar app is closed.</p>
+        </div></li>
+        <li><div>
+          <strong>Allow it in System Settings</strong>
+          <p>macOS asks you to approve it. Go to <b>System Settings › General › Login Items &amp; Extensions</b> and turn on <b>FSMac</b> under <i>Allow in the Background</i>. The welcome window ticks the step off once the helper is running.</p>
+        </div></li>
+        <li><div>
+          <strong>Give the helper Full Disk Access</strong>
+          <p>macOS doesn't let background services read connected disks without Full Disk Access, and it can't ask on their behalf. The first time you connect a disk, the menu bar window shows <b>Allow FSMac to read disks</b>. Click <b>Open Settings</b>: <b>Privacy &amp; Security › Full Disk Access</b> opens, together with a Finder window showing <code>fsmacd</code>. Drag <code>fsmacd</code> into the list and make sure it is turned on. You only do this once.</p>
+        </div></li>
+        <li><div>
+          <strong>Connect a disk</strong>
+          <p>NTFS and ext volumes are mounted automatically, a few seconds after access is granted the first time. They appear in Finder's sidebar and on the desktop, and are listed in the menu bar window.</p>
+        </div></li>
+      </ol>
+      <div class="note">
+        <span class="label">If the Login Items step fails</span>
+        <p>Use <b>Install with Password…</b> in the welcome window or in <b>Settings › Helper</b>. It installs the same helper as a classic LaunchDaemon after asking for an administrator password. The command-line equivalent:</p>
+        <div class="code"><pre>sudo /Applications/FSMac.app/Contents/Helpers/fsmac install-helper</pre><button class="copy" type="button">Copy</button></div>
+      </div>
+      <p>To start the menu bar app at login, turn on <b>Open FSMac at login</b> in the welcome window or in <b>Settings › General</b>. The app is optional: the helper mounts disks without it.</p>
+    </section>
+
+    <section id="everyday">
+      <h2>Everyday use</h2>
+      <p>Work with the disk in Finder or any app as usual. A few things are worth knowing:</p>
+      <dl class="defs">
+        <dt>Mounting</dt>
+        <dd>Automatic when a disk is connected. Volumes appear at <code>/Volumes/&lt;name&gt;</code>. Two volumes with the same name get <code>Name</code> and <code>Name 1</code>.</dd>
+        <dt>Ejecting</dt>
+        <dd>Use Finder's eject button, the eject button in the menu bar window, Disk Utility, or <code>fsmac eject</code>. FSMac writes everything out, marks the volume clean and then ejects the disk. If the disk also holds a volume macOS mounted itself (for example an exFAT partition), unmounting the FSMac volume in Finder leaves the disk attached; eject the disk from Finder as usual.</dd>
+        <dt>Files in use</dt>
+        <dd>A volume with open files is not unmounted. FSMac tells you which apps hold it, for example <i>The volume is in use by Preview.</i></dd>
+        <dt>Unplugging</dt>
+        <dd>Always eject first. If a disk disappears while mounted read-write, FSMac cleans up and shows <i>Disk Not Ejected Properly</i>. NTFS volumes are recovered by ntfs-3g on the next mount and ext volumes are checked with <code>e2fsck</code> automatically.</dd>
+        <dt>Finder metadata</dt>
+        <dd>Tags, colors, extended attributes, resource forks, the <i>hidden</i> flag and Gatekeeper quarantine are kept, stored natively on the disk, so they survive a trip through Windows or Linux. No <code>._</code> files are created.</dd>
+      </dl>
+    </section>
+
+    <section id="menu">
+      <h2>The menu bar window</h2>
+      <p>Click the drive icon in the menu bar. Volumes are grouped by physical disk. Each row shows the name, format, free space and state, with buttons to open the volume in Finder, mount or eject it, and a <b>⋯</b> menu for everything else.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>State</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip on">Mounted</span></td><td>Read and write through FSMac.</td></tr>
+          <tr><td><span class="chip ro">Mounted read-only</span></td><td>Read-only through FSMac: asked for, set as the volume's preference, or chosen by FSMac to protect the data. The reason appears under the name.</td></tr>
+          <tr><td><span class="chip off">Read-only (macOS driver)</span></td><td>NTFS mounted by macOS's own read-only driver, for example when <b>Read Only</b> is chosen for NTFS.</td></tr>
+          <tr><td><span class="chip off">Not mounted</span></td><td>Connected but unmounted: you unmounted it, or it is set not to mount automatically.</td></tr>
+          <tr><td><span class="chip off">Ignored</span></td><td>Set to <b>Ignore This Volume</b>; FSMac leaves it alone.</td></tr>
+          <tr><td><span class="chip off">Checking…</span></td><td>A filesystem check is running, before mounting or on request.</td></tr>
+          <tr><td><span class="chip err">Error</span></td><td>Mounting failed or the disk stopped responding. The message explains what happened; <b>Mount</b> tries again.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>The ⋯ menu</h3>
+      <dl class="defs">
+        <dt>Mount / Unmount</dt><dd>Also <b>Mount Read-Only</b>, <b>Remount Read-Only</b> and <b>Remount Read &amp; Write</b>.</dd>
+        <dt>When Connected</dt><dd>Remembers how this volume is handled, by its UUID: the default, <b>Mount Read &amp; Write</b>, <b>Mount Read-Only</b>, <b>Don't Mount Automatically</b>, or <b>Ignore This Volume</b>. Review these under <b>Settings › Volumes</b>.</dd>
+        <dt>Check Disk… / Erase…</dt><dd>See <a href="#tools">Check, repair, erase</a>.</dd>
+        <dt>Discard hibernation</dt><dd>Shown for NTFS volumes left hibernated by Windows. See <a href="#ntfs">NTFS details</a>.</dd>
+        <dt>Force Unmount</dt><dd>Unmounts even with files open. Unsaved changes in apps using the volume are lost. Available to administrators and the user at the Mac.</dd>
+      </dl>
+    </section>
+
+    <section id="tools">
+      <h2>Check, repair, erase</h2>
+      <h3>Check Disk</h3>
+      <p><b>Check</b> looks for problems without changing anything; <b>Repair</b> fixes them. A mounted volume is unmounted for the check and mounted again afterwards. Both need an administrator account.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Format</th><th>Check</th><th>Repair</th></tr></thead>
+        <tbody>
+          <tr><td>ext2/3/4</td><td class="wrap"><code>e2fsck -fn</code></td><td class="wrap"><code>e2fsck -fy</code>, a complete repair</td></tr>
+          <tr><td>NTFS</td><td class="wrap"><code>ntfsfix -n</code></td><td class="wrap"><code>ntfsfix -d</code>: fixes common inconsistencies, resets the journal and clears the dirty flag. For deep repairs run <code>chkdsk /f</code> on Windows.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Erase</h3>
+      <p>Creates a new, empty NTFS or ext4 volume. You can erase just the selected volume or the entire disk. Erasing the entire disk creates a GUID partition table with one data partition of type <i>Microsoft Basic Data</i>, which Windows, Linux and macOS all accept. FSMac refuses to erase the startup disk and macOS system partitions. Internal disks can only be erased from the command line, with <code>fsmac format … --force</code>.</p>
+      <div class="note warn"><span class="label">Careful</span><p>Erasing deletes everything on the volume or disk and cannot be undone.</p></div>
+      <p class="small muted">Names are limited to 32 characters on NTFS and 16 bytes on ext4. New ext4 volumes use e2fsprogs 1.47 defaults (journal, extents, 64-bit, metadata checksums).</p>
+    </section>
+
+    <section id="settings">
+      <h2>Settings</h2>
+      <p>Open <b>Settings…</b> from the menu bar window. Changing settings needs an administrator account, because they apply to every user of the Mac. Each setting can also be set with <code>fsmac config &lt;key&gt; &lt;value&gt;</code>.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Setting</th><th>Default</th><th>Key</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td>NTFS volumes</td><td>Read &amp; Write</td><td><code>ntfsMode</code></td><td><code>read-write</code>, <code>read-only</code> (macOS's driver) or <code>ignore</code>.</td></tr>
+          <tr><td>ext2/3/4 volumes</td><td>Read &amp; Write</td><td><code>extMode</code></td><td><code>read-write</code>, <code>read-only</code> or <code>ignore</code>.</td></tr>
+          <tr><td>Mount automatically</td><td>On</td><td><code>autoMount</code></td><td>Mount supported volumes when a disk is connected.</td></tr>
+          <tr><td>Eject when unmounted</td><td>On</td><td><code>ejectWhenUnmounted</code></td><td>When you unmount the last FSMac volume of a disk in Finder, eject the disk too, as Finder does for Mac disks.</td></tr>
+          <tr><td>Check unclean ext volumes</td><td>On</td><td><code>autoRepairExt</code></td><td>Run <code>e2fsck -p</code> before mounting an ext volume that was not unmounted cleanly, as Linux does at boot. Volumes with problems it can't fix are mounted read-only.</td></tr>
+          <tr><td>Windows-compatible names</td><td>On</td><td><code>windowsCompatibleNames</code></td><td>Store characters Windows forbids as look-alikes. See <a href="#ntfs">NTFS details</a>.</td></tr>
+          <tr><td>Hide dot files from Windows</td><td>On</td><td><code>hideDotFilesOnNTFS</code></td><td>Give files whose names start with "." the Windows hidden attribute.</td></tr>
+          <tr><td>NTFS file permissions</td><td>644</td><td><code>ntfsFileMode</code></td><td>Unix permissions shown for NTFS files: 644, 664, 666 or 600.</td></tr>
+          <tr><td>Show Linux owners</td><td>Off</td><td><code>keepExtOwnership</code></td><td>Show and set the owners and permissions stored on ext volumes, instead of presenting everything as yours.</td></tr>
+        </tbody>
+      </table></div>
+      <p class="small muted">Name, permission and ownership settings take effect the next time a volume is mounted. Mount-mode changes apply immediately.</p>
+    </section>
+
+    <section id="cli">
+      <h2>Command line</h2>
+      <p>Install <code>fsmac</code> into <code>/usr/local/bin</code> with <b>Settings › Helper › Install Command-Line Tool…</b>, or run it from <code>/Applications/FSMac.app/Contents/Helpers/fsmac</code>. A <i>volume</i> is a device name (<code>disk4s1</code>), a volume name, or a mount point.</p>
+      <div class="code term"><pre><span class="prompt">$ </span>fsmac list
+<span class="out">DEVICE   TYPE  NAME            SIZE                    STATE    MOUNT POINT
+disk4s2  NTFS  Windows Backup  412 GB free of 1 TB     mounted  /Volumes/Windows Backup
+disk4s3  ext4  linux-home      31 GB free of 512.11 GB mounted  /Volumes/linux-home</span></pre><button class="copy" type="button" data-copy="fsmac list">Copy</button></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>fsmac list [--json]</code></td><td>NTFS and ext volumes, their state and free space. This is the default command.</td></tr>
+          <tr><td><code>fsmac mount &lt;volume&gt; [--read-only]</code></td><td>Mount. <code>--remove-hibernation</code> discards Windows' hibernation data and mounts read &amp; write.</td></tr>
+          <tr><td><code>fsmac unmount &lt;volume&gt; [--force] [--eject]</code></td><td>Unmount; optionally eject the disk afterwards.</td></tr>
+          <tr><td><code>fsmac eject &lt;volume|disk&gt;</code></td><td>Unmount everything on the disk and eject it.</td></tr>
+          <tr><td><code>fsmac check &lt;volume&gt; [--repair]</code></td><td>Check or repair, printing the tool's output.</td></tr>
+          <tr><td><code>fsmac format &lt;disk&gt; --type ntfs|ext4 --label NAME</code></td><td>Erase a partition (<code>disk4s2</code>) or a whole disk (<code>disk4</code>). Asks you to type the device name unless <code>--yes</code> is given.</td></tr>
+          <tr><td><code>fsmac policy &lt;volume&gt; read-write|read-only|ignore|default</code></td><td>Remember how to handle this volume. Add <code>--no-auto-mount</code> to mount it only on request.</td></tr>
+          <tr><td><code>fsmac config [&lt;key&gt; &lt;value&gt;]</code></td><td>Show the settings, or change one. Keys are listed under <a href="#settings">Settings</a>.</td></tr>
+          <tr><td><code>fsmac watch</code></td><td>Follow volume events as they happen.</td></tr>
+          <tr><td><code>fsmac status</code></td><td>Whether the helper is running, and its version.</td></tr>
+          <tr><td><code>fsmac log [-f]</code></td><td>Show (or follow) the helper's log.</td></tr>
+          <tr><td><code>sudo fsmac install-helper</code></td><td>Install the helper as a LaunchDaemon; <code>uninstall-helper</code> removes it.</td></tr>
+        </tbody>
+      </table></div>
+      <p>Examples:</p>
+      <div class="code"><pre>fsmac mount "Windows Backup" --read-only
+fsmac check disk4s3 --repair
+fsmac format disk5 --type ext4 --label pi-data
+fsmac config ntfsMode read-only</pre><button class="copy" type="button">Copy</button></div>
+    </section>
+
+    <section id="ntfs">
+      <h2>NTFS details</h2>
+      <h3>File names</h3>
+      <p>NTFS stores names in UTF-16 and Windows rejects a few characters that are fine on a Mac. With <b>Windows-compatible names</b> on, FSMac stores them as characters from Unicode's private-use area. This is the mapping used by macOS's SMB client and Windows' Services for Mac, so Windows shows look-alike characters, and FSMac and macOS's own NTFS driver show the original names.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>On the Mac</th><th>Stored on disk</th></tr></thead>
+        <tbody class="num">
+          <tr><td><code>"</code> <code>*</code> <code>:</code> <code>&lt;</code></td><td>U+F020, U+F021, U+F022, U+F023</td></tr>
+          <tr><td><code>&gt;</code> <code>?</code> <code>\</code> <code>|</code></td><td>U+F024, U+F025, U+F026, U+F027</td></tr>
+          <tr><td>Control characters U+0001–U+001F</td><td>U+F001–U+F01F</td></tr>
+          <tr><td>A trailing space / a trailing period</td><td>U+F028 / U+F029</td></tr>
+        </tbody>
+      </table></div>
+      <p>Lookups are case-insensitive, like on Windows, and case-only renames (<code>photo.JPG</code> → <code>photo.jpg</code>) work. Names are normalized to NFC, the form Windows and Linux use.</p>
+      <h3>Attributes and metadata</h3>
+      <ul>
+        <li>Extended attributes, tags and resource forks are stored as NTFS named streams.</li>
+        <li>The Windows <i>hidden</i> attribute is Finder's hidden flag, and vice versa.</li>
+        <li>The Windows <i>read-only</i> attribute is the owner's write permission.</li>
+        <li>Junctions and symbolic links created on Windows appear as symbolic links.</li>
+        <li>Compressed and sparse files can be read and written. Files encrypted with Windows EFS cannot be read.</li>
+        <li>Windows permissions (ACLs) are not translated; files show the permissions chosen in Settings.</li>
+      </ul>
+      <h3>Hibernated Windows and Fast Startup</h3>
+      <p>When Windows hibernates, or shuts down with Fast Startup, it saves its session on the disk and expects to find the disk unchanged. Writing to it then can lose data. FSMac therefore mounts such volumes read-only and says so. You have two options:</p>
+      <ul>
+        <li>Start Windows and shut it down fully: hold <kbd>Shift</kbd> while choosing <b>Shut Down</b>, or turn off Fast Startup in Windows' power settings.</li>
+        <li>Choose <b>Mount Read &amp; Write (discard Windows hibernation)…</b> in the volume's ⋯ menu. This deletes the saved session, and anything unsaved in it is lost. Windows then starts fresh.</li>
+      </ul>
+    </section>
+
+    <section id="ext">
+      <h2>ext2/3/4 details</h2>
+      <h3>Ownership and permissions</h3>
+      <p>By default all files appear to belong to the user logged in at the Mac. That user changes with logins and fast user switching. Permissions follow the owner bits stored on disk. New files and folders get the owner and group of their parent folder, so they stay accessible to the right account on Linux. To work with the real Linux owners and permissions instead, turn on <b>Settings › ext4 › Show the Linux owners</b>.</p>
+      <h3>Journals and unclean volumes</h3>
+      <p>A journal left by a Linux system that crashed or was unplugged is replayed when the volume is mounted. With <b>Check unclean ext volumes</b> on, a volume that was not unmounted cleanly is checked with <code>e2fsck -p</code> first, and the menu reports when it was repaired. FSMac writes data in place and flushes it within a few seconds of the last change (immediately when an app syncs a file). It does not use the journal for its own writes, so eject before unplugging.</p>
+      <h3>Volumes mounted read-only</h3>
+      <p>These are mounted read-only, with the reason shown in the menu:</p>
+      <ul>
+        <li>The filesystem is marked as having errors. Repair it with <b>Check Disk…</b>.</li>
+        <li>It uses features FSMac does not write: case-folding, fs-verity, quota tracking or shared blocks.</li>
+        <li>It has an external journal, or it is a journal device.</li>
+        <li>The disk is write-protected.</li>
+      </ul>
+      <p>Extended attributes and Finder metadata are stored in the <code>user.</code> namespace, so Linux tools like <code>getfattr</code> see them. Inline data, bigalloc, 1 KB blocks, ext2 without a journal and ext3 are all supported for reading and writing.</p>
+    </section>
+
+    <section id="limits">
+      <h2>Limitations</h2>
+      <ul>
+        <li><b>No Trash.</b> These volumes behave like network volumes in Finder, which offers to delete items immediately instead of moving them to the Trash.</li>
+        <li><b>Spotlight</b> does not index them, and <b>Time Machine</b> cannot back up to them.</li>
+        <li><b>Hard links</b> are preserved, but the extended attributes of a hard-linked file are only visible through one of its names.</li>
+        <li><b>Apple silicon only.</b> This build is not universal.</li>
+        <li><b>Not notarized.</b> On a Mac other than the one it was built on, the first launch needs Control-click › Open.</li>
+      </ul>
+      <div class="note"><span class="label">Release status, 1.0.2</span>
+        <p>Tested on macOS 27 with disk images: every NTFS and ext code path, the helper's lifecycle, and the app. With a real USB drive (NTFS and ext4 partitions), mounting read &amp; write and reading through the installed helper have been verified. Writing to a real drive, the <code>fsmac_ext.fs</code> component that keeps macOS from calling ext disks unreadable, and unplugging a drive without ejecting have not yet been verified on real hardware.</p>
+      </div>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>Troubleshooting</h2>
+      <p>Start with <code>fsmac status</code> and the helper's log (<code>fsmac log -f</code>, or <b>Settings › Helper › Show Logs in Finder</b>). Each mounted volume also has its own log, named after the device, for example <code>disk4s2.log</code>.</p>
+
+      <details class="faq"><summary>The menu says the helper is not running</summary><div>
+        <p>Open <b>Settings › Helper</b>. If it says <i>Waiting for approval</i>, turn FSMac on in <b>System Settings › General › Login Items &amp; Extensions</b>. If it is installed but not responding, click <b>Reinstall</b>. If Login Items registration doesn't work on your Mac, use <b>Install with Password…</b>.</p>
+      </div></details>
+
+      <details class="faq"><summary>The menu says “Allow FSMac to read disks”</summary><div>
+        <p>The helper doesn't have Full Disk Access yet, so macOS refuses to let it read the disk. Click <b>Open Settings</b>, drag <code>fsmacd</code> into the Full Disk Access list and turn it on. FSMac retries every few seconds and mounts the disk as soon as access is granted. Until then, NTFS volumes are available read-only through macOS's own driver.</p>
+      </div></details>
+
+      <details class="faq"><summary>A disk doesn't show up</summary><div>
+        <p>Check that macOS sees it with <code>diskutil list</code>. Run <code>fsmac list</code>: a volume marked <i>ignored</i> or <i>not mounted</i> can be mounted from the menu. If the volume isn't listed at all, it isn't NTFS or ext, or its first sectors are unreadable; the log says which.</p>
+      </div></details>
+
+      <details class="faq"><summary>A volume was mounted read-only</summary><div>
+        <p>The reason appears under its name. The usual causes:</p>
+        <ul>
+          <li>Windows is hibernated (see <a href="#ntfs">NTFS details</a>).</li>
+          <li>The ext volume has errors: use <b>Check Disk… › Repair</b>.</li>
+          <li>The disk is write-protected.</li>
+          <li>The volume's preference is <b>Mount Read-Only</b>.</li>
+        </ul>
+      </div></details>
+
+      <details class="faq"><summary>Eject says the volume is in use</summary><div>
+        <p>Quit or close the apps named in the message, including Terminal windows whose current folder is on the volume, then eject again. <b>Force Unmount</b> works too, but apps lose unsaved changes to files on the volume.</p>
+      </div></details>
+
+      <details class="faq"><summary>macOS says a Linux disk “was not readable”</summary><div>
+        <p>This appears when the helper isn't installed, because macOS has no ext driver of its own; click <b>Ignore</b> and install the helper. The helper installs <code>/Library/Filesystems/fsmac_ext.fs</code> so that macOS recognizes ext volumes and leaves them to FSMac. If the message still appears right after installing, restart the Mac once.</p>
+      </div></details>
+
+      <details class="faq"><summary>“Disk Not Ejected Properly”</summary><div>
+        <p>The disk disappeared while mounted read-write. Reconnect it: NTFS volumes are recovered on mount, and ext volumes are checked automatically if <b>Check unclean ext volumes</b> is on. To be thorough, run <b>Check Disk… › Repair</b>.</p>
+      </div></details>
+
+      <details class="faq"><summary>Files show the wrong owner, or “You don't have permission”</summary><div>
+        <p>On NTFS, check the Windows read-only attribute: it removes write permission. On ext volumes with <b>Show the Linux owners</b> on, files belong to their Linux users; turn it off to present them as yours.</p>
+      </div></details>
+
+      <details class="faq"><summary>The menu says the helper is from another version</summary><div>
+        <p>After updating the app, click <b>Update</b>. The old helper unmounts its volumes cleanly, and the one from the new app takes over. Updating from 1.0.0 registers the helper again, so macOS may ask you to allow it in Login Items once more.</p>
+      </div></details>
+    </section>
+
+    <section id="how">
+      <h2>How it works</h2>
+      <p>macOS only lets software add filesystem drivers with entitlements Apple grants individually. FSMac therefore serves each volume from a small program on the Mac, and macOS's built-in NFS client mounts it. The traffic stays inside the machine, over the loopback interface.</p>
+      <figure class="arch" aria-label="How a file request travels from Finder to the disk">
+        <div class="arch-main">
+          <div class="box">Finder and apps</div>
+          <div class="link">file system calls</div>
+          <div class="box">macOS NFS client <span>kernel</span></div>
+          <div class="link">NFSv3 over 127.0.0.1</div>
+          <div class="box accent">fsmac-worker <span>one per volume</span></div>
+          <div class="link"></div>
+          <div class="box">Block cache <span>read-ahead, write coalescing</span></div>
+          <div class="link"></div>
+          <div class="box">libntfs-3g / libext2fs</div>
+          <div class="link"></div>
+          <div class="box mono">/dev/rdiskN</div>
+        </div>
+        <div class="arch-side">
+          <div class="box">FSMac.app and fsmac CLI</div>
+          <div class="link side">Unix socket</div>
+          <div class="box accent">fsmacd helper <span>root</span></div>
+          <div class="link side">Disk Arbitration, mount_nfs, supervision</div>
+          <div class="box">every fsmac-worker</div>
+        </div>
+      </figure>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Component</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td><code>fsmacd</code></td><td>The helper, a LaunchDaemon. It watches Disk Arbitration, identifies NTFS and ext volumes, keeps macOS's read-only NTFS driver off volumes FSMac mounts, starts a worker per volume and mounts it. It also handles unmounts and ejects, including ones requested by Finder or Disk Utility, and cleans up after unplugged disks and failed workers.</td></tr>
+          <tr><td><code>fsmac-worker</code></td><td>Opens the device and mounts it with ntfs-3g or libext2fs. It serves it as an NFSv3 server and translates extended attributes between virtual AppleDouble (<code>._</code>) files and native attributes on disk.</td></tr>
+          <tr><td><code>fsmac_ext.fs</code></td><td>A Disk Arbitration filesystem bundle with a probe tool that only reads the ext superblock. It makes macOS recognize ext volumes and leave them to FSMac.</td></tr>
+          <tr><td><code>fsmac-probe</code></td><td>Identifies volumes and reads labels, UUIDs and clean state.</td></tr>
+          <tr><td><code>FSMac.app</code>, <code>fsmac</code></td><td>The menu bar app and the command line. Both talk to the helper.</td></tr>
+          <tr><td>Bundled tools</td><td><code>mkntfs</code>, <code>ntfsfix</code>, <code>ntfslabel</code> (ntfs-3g); <code>mke2fs</code>, <code>e2fsck</code>, <code>tune2fs</code> (e2fsprogs).</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Security</h3>
+      <ul>
+        <li>Workers accept connections only from <code>127.0.0.1</code> and only from privileged ports, so only the kernel's NFS client can reach them. Once a worker has opened the device and its socket, it gives up root and runs as <code>nobody</code>, because it parses untrusted on-disk data.</li>
+        <li>The helper's socket is open to local users, and requests are authorized per user. Mounting, unmounting and ejecting FSMac volumes are open to everyone, as in Finder. Changing settings, checking and erasing need an administrator. Overriding a volume's preference, force unmounting and discarding hibernation data need an administrator or the user at the Mac. Ejects are limited to disks that hold FSMac volumes.</li>
+      </ul>
+      <h3>Mount options</h3>
+      <p>Volumes are mounted from <code>127.0.0.1:/fsmac/&lt;device&gt;/&lt;name&gt;</code> with:</p>
+      <div class="code"><pre>vers=3,tcp,hard,intr,timeo=600,retrans=10,deadtimeout=0,locallocks,nfc,
+rsize=1048576,wsize=1048576,readahead=32,nordirplus,nodev,nosuid,mutejukebox,resvport</pre></div>
+      <p class="small muted">Hard mounts keep a long operation from turning into an I/O error; if a worker fails, the helper force-unmounts instead. <code>nordirplus</code> keeps the client from answering lookups of the virtual <code>._</code> files from a cached listing. A duplicate-request cache makes retransmitted creates, renames and deletes safe. When a worker exits, its status says why:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Worker exit status</th><th>Meaning</th></tr></thead>
+        <tbody class="num">
+          <tr><td>0</td><td>Stopped cleanly; everything written and the volume marked clean.</td></tr>
+          <tr><td>1</td><td>Failed after mounting.</td></tr>
+          <tr><td>2</td><td>Bad arguments.</td></tr>
+          <tr><td>3</td><td>The filesystem could not be mounted.</td></tr>
+          <tr><td>4</td><td>The device stopped responding or disappeared.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="files">
+      <h2>Files and locations</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Path</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td class="wrap"><code>/Applications/FSMac.app/Contents/Helpers/</code></td><td>The helper, worker, CLI and bundled tools.</td></tr>
+          <tr><td class="wrap"><code>/Library/Application Support/FSMac/config.json</code></td><td>Settings and per-volume preferences.</td></tr>
+          <tr><td class="wrap"><code>/Library/Logs/FSMac/</code></td><td><code>fsmacd.log</code> (rotated at 8 MB) and one log per volume.</td></tr>
+          <tr><td class="wrap"><code>/var/run/fsmac.sock</code></td><td>The helper's control socket.</td></tr>
+          <tr><td class="wrap"><code>/Library/Filesystems/fsmac_ext.fs</code></td><td>Lets macOS recognize ext volumes.</td></tr>
+          <tr><td class="wrap"><code>/Library/LaunchDaemons/com.fsmac.daemon.plist</code></td><td>Only when installed with a password.</td></tr>
+          <tr><td class="wrap"><code>/Volumes/&lt;name&gt;</code></td><td>Mount points.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="quality">
+      <h2>Testing and performance</h2>
+      <div class="stats">
+        <div class="stat"><div class="n">4.6 GB/s</div><div class="l">NTFS sequential read and write</div></div>
+        <div class="stat"><div class="n">3.1 / 4.0</div><div class="l">ext4 write / read, GB/s</div></div>
+        <div class="stat"><div class="n">0.8–1.0 s</div><div class="l">to list 2,000 files, cold</div></div>
+      </div>
+      <p class="small muted">Measured through the macOS file system path on an Apple-silicon Mac, with disk images on the internal SSD and random data flushed with fsync. Real disks run at their own speed.</p>
+      <p><code>make test</code> runs the whole suite without root:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Suite</th><th>What it covers</th></tr></thead>
+        <tbody>
+          <tr><td>Block cache</td><td>200,000 random operations against a shadow copy under AddressSanitizer, with 512-byte and 4 KB sectors and caches from 64 KB to 8 MB.</td></tr>
+          <tr><td>Engine stress</td><td>20,000 random operations compared with the same operations on APFS, on nine variants: ext2, ext3, ext4 (default, 1 KB blocks, inline data, bigalloc) and NTFS (512 B, 4 KB, 64 KB clusters). Each is followed by <code>e2fsck</code> or <code>ntfsfix</code>.</td></tr>
+          <tr><td>End to end</td><td>35 checks through the real macOS NFS client: <code>ditto</code> copies with Unicode names, xattrs, resource forks, links; renames; persistence; no <code>._</code> files on disk; and a cross-check that Apple's own NTFS driver reads what FSMac wrote.</td></tr>
+          <tr><td>Concurrency</td><td>6 processes × 3,000 random reads, writes, truncations and renames per filesystem.</td></tr>
+          <tr><td>Helper lifecycle</td><td>28 checks:
+            <ul>
+              <li>auto-mount, remount and read-only mounts;</li>
+              <li>refusing to unmount open files;</li>
+              <li>crash recovery with automatic repair;</li>
+              <li>same-named volumes;</li>
+              <li>formatting next to another volume;</li>
+              <li>Finder-style unmounts and <code>diskutil eject</code>.</li>
+            </ul></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="build">
+      <h2>Build from source</h2>
+      <p>You need macOS 14 or later, Xcode or the Command Line Tools, and autoconf, automake, libtool and pkg-config (for example from Homebrew).</p>
+      <div class="code"><pre>make            # libraries, engine, worker, tools and build/FSMac.app
+make test       # the full test suite
+make dist       # build/dist/FSMac-&lt;version&gt;.dmg</pre><button class="copy" type="button">Copy</button></div>
+      <p>The app is signed with the first <i>Developer ID Application</i> or <i>Apple Development</i> identity found; set <code>SIGN_IDENTITY</code> to choose one. To develop without installing anything, run the helper unprivileged. It then handles disks you can open yourself, such as attached disk images, and mounts them under <code>~/FSMacVolumes</code>; the app and CLI connect to it automatically.</p>
+      <div class="code"><pre>build/bin/fsmacd --user-mode
+hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount disk.img</pre><button class="copy" type="button">Copy</button></div>
+      <dl class="defs small">
+        <dt><code>engine/</code></dt><dd>Block cache and the NTFS and ext backends (C).</dd>
+        <dt><code>nfs/</code>, <code>worker/</code></dt><dd>NFSv3 and MOUNT server, AppleDouble translation, <code>fsmac-worker</code>.</dd>
+        <dt><code>daemon/</code></dt><dd><code>fsmacd</code> (Swift).</dd>
+        <dt><code>app/</code>, <code>cli/</code>, <code>shared/</code></dt><dd>The menu bar app, the CLI and their shared protocol.</dd>
+        <dt><code>tools/</code>, <code>tests/</code></dt><dd>Debug shell, probes and the test suites.</dd>
+        <dt><code>vendor/</code></dt><dd>ntfs-3g and e2fsprogs sources.</dd>
+      </dl>
+    </section>
+
+    <section id="uninstall">
+      <h2>Uninstall</h2>
+      <ol class="steps">
+        <li><div><p>In <b>Settings › Helper</b>, click <b>Uninstall…</b>. FSMac unmounts every volume and removes the helper and <code>/Library/Filesystems/fsmac_ext.fs</code>.</p></div></li>
+        <li><div><p>Move FSMac to the Trash. To remove settings and logs as well, delete <code>/Library/Application Support/FSMac</code> and <code>/Library/Logs/FSMac</code>.</p></div></li>
+      </ol>
+      <p>If you installed with a password, uninstall with:</p>
+      <div class="code"><pre>sudo /Applications/FSMac.app/Contents/Helpers/fsmac uninstall-helper</pre><button class="copy" type="button">Copy</button></div>
+    </section>
+
+    <section id="license">
+      <h2>License and credits</h2>
+      <p>FSMac is free software under the GNU General Public License, version 2. It is built on two projects, included unmodified apart from build configuration:</p>
+      <ul>
+        <li><b>ntfs-3g</b> (2026.9.28), the NTFS implementation and <code>mkntfs</code>, <code>ntfsfix</code>, <code>ntfslabel</code>. GPL v2 or later.</li>
+        <li><b>e2fsprogs</b> (1.47.4), with libext2fs, journal recovery, <code>mke2fs</code>, <code>e2fsck</code> and <code>tune2fs</code>. GPL v2, with LGPL, BSD and MIT-licensed libraries.</li>
+      </ul>
+      <footer class="end">FSMac 1.0.2 · Manual for macOS 14 and later on Apple silicon.</footer>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  // Copy buttons: copy the block's text (or data-copy), fall back to selecting it.
+  document.querySelectorAll(".code").forEach(function (block) {
+    var btn = block.querySelector("button.copy");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var pre = block.querySelector("pre");
+      var text = btn.getAttribute("data-copy") || pre.innerText.trim();
+      var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1500); };
+      var fallback = function () {
+        var range = document.createRange();
+        range.selectNodeContents(pre);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        btn.textContent = "Selected";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+      };
+      try {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } catch (e) { fallback(); }
+    });
+  });
+
+  // Contents: collapsed by default on narrow screens.
+  var toc = document.getElementById("toc-details");
+  var narrow = window.matchMedia("(max-width: 860px)");
+  var sync = function () { toc.open = !narrow.matches; };
+  sync();
+  if (narrow.addEventListener) narrow.addEventListener("change", sync);
+  document.querySelectorAll("nav.toc a").forEach(function (a) {
+    a.addEventListener("click", function () { if (narrow.matches) toc.open = false; });
+  });
+  // Keep the summary from toggling on wide screens.
+  toc.querySelector("summary").addEventListener("click", function (e) { if (!narrow.matches) e.preventDefault(); });
+
+  // Highlight the section being read.
+  var links = {};
+  document.querySelectorAll("nav.toc a").forEach(function (a) { links[a.getAttribute("href").slice(1)] = a; });
+  if ("IntersectionObserver" in window) {
+    var current = null;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          if (current) current.classList.remove("active");
+          current = links[en.target.id];
+          if (current) current.classList.add("active");
+        }
+      });
+    }, { rootMargin: "-10% 0px -75% 0px" });
+    document.querySelectorAll("main section[id]").forEach(function (s) { io.observe(s); });
+  }
+})();
+</script>
+</body>
+</html>

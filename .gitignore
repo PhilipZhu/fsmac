@@ -1,0 +1,61 @@
+# macOS and editor files
+.DS_Store
+._*
+.Spotlight-V100/
+.Trashes/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build products and local test data
+/build/
+DerivedData/
+*.dSYM/
+__pycache__/
+*.py[cod]
+
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+
+# Local overrides
+*.local
+*.local.*
+
+# Generated ntfs-3g autotools files
+/vendor/ntfs-3g/INSTALL
+/vendor/ntfs-3g/Makefile.in
+/vendor/ntfs-3g/aclocal.m4
+/vendor/ntfs-3g/compile
+/vendor/ntfs-3g/config.guess
+/vendor/ntfs-3g/config.guess~
+/vendor/ntfs-3g/config.h.in
+/vendor/ntfs-3g/config.sub
+/vendor/ntfs-3g/config.sub~
+/vendor/ntfs-3g/configure
+/vendor/ntfs-3g/configure~
+/vendor/ntfs-3g/depcomp
+/vendor/ntfs-3g/include/Makefile.in
+/vendor/ntfs-3g/include/fuse-lite/Makefile.in
+/vendor/ntfs-3g/include/ntfs-3g/Makefile.in
+/vendor/ntfs-3g/install-sh
+/vendor/ntfs-3g/libfuse-lite/Makefile.in
+/vendor/ntfs-3g/libntfs-3g/Makefile.in
+/vendor/ntfs-3g/ltmain.sh
+/vendor/ntfs-3g/m4/libtool.m4
+/vendor/ntfs-3g/m4/ltoptions.m4
+/vendor/ntfs-3g/m4/ltsugar.m4
+/vendor/ntfs-3g/m4/ltversion.m4
+/vendor/ntfs-3g/m4/lt~obsolete.m4
+/vendor/ntfs-3g/missing
+/vendor/ntfs-3g/ntfsprogs/Makefile.in
+/vendor/ntfs-3g/src/Makefile.in
+/vendor/ntfs-3g/autom4te.cache/
