@@ -67,7 +67,7 @@ struct CheckView: View {
                     .disabled(running || volume == nil || !model.isAdmin)
             }
             if !model.isAdmin {
-                Text("Checking disks requires an administrator account.")
+                Text("Requires an administrator.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -76,11 +76,8 @@ struct CheckView: View {
     }
 
     private var subtitle: String {
-        guard let v = volume else { return "The disk is no longer connected." }
-        if v.fsType == "ntfs" {
-            return "Checks the NTFS structures and resets the journal. Windows' chkdsk can repair more problems."
-        }
-        return "Runs e2fsck. A mounted volume is unmounted during the check and mounted again afterwards."
+        guard let v = volume else { return "Disconnected." }
+        return v.fsType == "ntfs" ? "ntfsfix" : "e2fsck"
     }
 
     private func run(repair: Bool) {
@@ -119,7 +116,7 @@ struct FormatView: View {
                     .foregroundStyle(.red)
                 VStack(alignment: .leading) {
                     Text("Erase “\(volume?.displayName ?? diskID)”?").font(.headline)
-                    Text("Erasing deletes all data on it permanently. This cannot be undone.")
+                    Text("All data on it will be lost.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }
@@ -158,7 +155,7 @@ struct FormatView: View {
                 }
             }
             if !model.isAdmin {
-                Text("Erasing disks requires an administrator account.")
+                Text("Requires an administrator.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -179,8 +176,8 @@ struct FormatView: View {
             ? "Erase the entire disk “\(v.deviceName.isEmpty ? v.wholeDisk : v.deviceName)”?"
             : "Erase “\(v.displayName)”?"
         alert.informativeText = wholeDisk
-            ? "All volumes on \(v.wholeDisk) will be deleted and replaced by a single \(type == "ntfs" ? "NTFS" : "ext4") volume."
-            : "All data on \(v.id) will be deleted."
+            ? "Everything on \(v.wholeDisk) will be deleted."
+            : "Everything on \(v.id) will be deleted."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Erase")
         alert.addButton(withTitle: "Cancel")

@@ -37,12 +37,12 @@ private struct NotConnectedNote: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         if model.connection != .connected {
-            Label("The FSMac helper is not running; settings cannot be changed. See the Helper tab.",
+            Label("Helper not running.",
                   systemImage: "exclamationmark.triangle")
                 .font(.caption)
                 .foregroundStyle(.orange)
         } else if !model.isAdmin {
-            Label("Only administrators can change these settings.", systemImage: "lock")
+            Label("Administrators only.", systemImage: "lock")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -58,8 +58,6 @@ struct GeneralSettings: View {
             Section {
                 Toggle("Open FSMac at login", isOn: $openAtLogin)
                     .onChange(of: openAtLogin) { _, on in LoginItem.set(on) }
-                Text("The menu bar app is optional: disks are mounted by the helper even when it is not running.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("When a disk is connected") {
                 Toggle("Mount NTFS and ext volumes automatically", isOn: setting(model, \.autoMount))
@@ -92,8 +90,6 @@ struct NTFSSettings: View {
             Section("Compatibility") {
                 Toggle("Store characters Windows doesn't allow (? : * \" < > |) as look-alikes",
                        isOn: setting(model, \.windowsCompatibleNames))
-                Text("Uses the same mapping as macOS and Windows' Services for Mac, so Windows can open these files.")
-                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Hide files whose names start with a dot from Windows",
                        isOn: setting(model, \.hideDotFilesOnNTFS))
                 Picker("File permissions shown:", selection: setting(model, \.ntfsFileMode)) {
@@ -104,8 +100,6 @@ struct NTFSSettings: View {
                 }
             }
             Section {
-                Text("Changes apply the next time a volume is mounted.")
-                    .font(.caption).foregroundStyle(.secondary)
                 NotConnectedNote()
             }
         }
@@ -129,14 +123,10 @@ struct ExtSettings: View {
             Section("Integrity") {
                 Toggle("Check and repair volumes that were not unmounted cleanly",
                        isOn: setting(model, \.autoRepairExt))
-                Text("Runs e2fsck before mounting, as Linux does at boot. Volumes with errors that need attention are mounted read-only.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Ownership") {
                 Toggle("Show the Linux owners and permissions stored on the volume",
                        isOn: setting(model, \.keepExtOwnership))
-                Text("When off, all files appear to belong to you, and new files get the owner of their folder, so they stay accessible on Linux.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 NotConnectedNote()
@@ -162,8 +152,6 @@ struct VolumeSettings: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Volumes with their own setting")
                 .font(.headline)
-            Text("Choose “When Connected” in a volume’s menu to remember how it should be mounted.")
-                .font(.callout).foregroundStyle(.secondary)
             List {
                 if rows.isEmpty {
                     Text("None").foregroundStyle(.secondary)
@@ -241,8 +229,6 @@ struct HelperSettings: View {
                         cliInstalled = HelperStatus.commandLineToolInstalled
                     }
                 }
-                Text("Run `fsmac help` in Terminal for mounting, checking and formatting from scripts.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Troubleshooting") {
                 Button("Show Logs in Finder") {
@@ -278,7 +264,7 @@ struct HelperSettings: View {
     private func confirmUninstall() {
         let alert = NSAlert()
         alert.messageText = "Uninstall the FSMac helper?"
-        alert.informativeText = "Mounted NTFS and ext volumes are unmounted first. NTFS disks will be read-only (macOS driver) and ext disks unavailable until you install it again."
+        alert.informativeText = "Mounted volumes are unmounted first."
         alert.addButton(withTitle: "Uninstall")
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn { model.uninstallHelper() }
@@ -296,10 +282,7 @@ struct AboutView: View {
                 .foregroundStyle(.secondary)
             Text("Read and write NTFS and ext2/3/4 disks on your Mac.")
             Divider().frame(width: 300)
-            Text("""
-                Built on ntfs-3g (Tuxera / ntfs-3g project) and e2fsprogs (Theodore Ts'o and contributors), \
-                licensed under the GNU GPL v2. FSMac is free software under the same license.
-                """)
+            Text("Uses ntfs-3g and e2fsprogs. GNU GPL v2.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

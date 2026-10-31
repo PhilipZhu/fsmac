@@ -31,6 +31,13 @@ final class Volume {
     var pendingMountPoint: String?
     /// Abandon the mount in progress.
     var cancelMount = false
+    /// The current worker reported that it wrote everything and marked the
+    /// filesystem clean.
+    var stoppedClean = false
+    /// Whether everything written to the volume is known to be on the disk:
+    /// false while it is mounted read-write or after a failure, true after a
+    /// confirmed clean stop (and for volumes FSMac never wrote to).
+    var lastStopClean = true
 
     init(info: VolumeInfo) {
         self.info = info
@@ -71,6 +78,18 @@ final class VolumeManager {
     private var releasedNative: Set<String> = []
     /// Whole disks we are ejecting ourselves.
     private var ejecting: Set<String> = []
+    /// Whole disks another app (Disk Utility, diskutil) is ejecting, with
+    /// the number of ejects in progress.
+    private var externalEjects: [String: Int] = [:]
+    /// Whole disks that disappeared while being ejected.
+    private var vanished: Set<String> = []
+    /// Partitions macOS announced while their disk was being ejected; they
+    /// are looked at once the eject is over.
+    private var deferredAppear: [String: Set<String>] = [:]
+    /// "Unmounted by the user" of partitions macOS re-announced during an
+    /// eject, carried over to their new Volume.
+    private var carriedUserUnmounted: [String: Bool] = [:]
+    private var lastSavedEjected: Data?
     /// Volumes whose free space is being read (statfs may block).
     private var spaceInFlight: Set<String> = []
     /// Bumped whenever a BSD name disappears, to drop stale probe results.
@@ -80,6 +99,18 @@ final class VolumeManager {
     private var unreadable: [String: DiskDescription] = [:]
     private var accessRetry: DispatchSourceTimer?
     private var accessRetryRunning = false
+    /// Disks ejected by FSMac, listed until they are unplugged.
+    private struct EjectRecord {
+        var info: EjectedDisk
+        /// The USB/Thunderbolt device to watch for unplugging.
+        var deviceID: UInt64?
+        /// When to stop listing a disk whose unplugging can't be observed.
+        var expires: Date?
+        /// A disk image: nothing to unplug once it is gone.
+        var virtual = false
+    }
+    private var ejected: [String: EjectRecord] = [:]
+    private var presenceTimer: DispatchSourceTimer?
     private(set) var shuttingDown = false
 
     /// Volume list changed (called on q).
@@ -99,6 +130,7 @@ final class VolumeManager {
     func start() {
         q.sync {
             cleanupStaleMounts()
+            loadEjected()
             watcher = DiskWatcher(queue: q)
             watcher.onAppeared = { [weak self] d in self?.diskAppeared(d) }
             watcher.onDisappeared = { [weak self] d in self?.diskDisappeared(d) }
@@ -134,7 +166,7 @@ final class VolumeManager {
                 id: d.bsdName, wholeDisk: d.wholeBSDName, fsType: type,
                 label: d.volumeName ?? "", uuid: "", size: d.size,
                 deviceName: d.deviceModel.isEmpty ? d.mediaName : d.deviceModel,
-                isInternal: d.isInternal, isEjectable: d.isEjectable || d.isRemovable,
+                isInternal: d.isInternal, isEjectable: d.isEjectable || d.isRemovable || !d.isInternal,
                 isWritableMedia: d.isWritable,
                 state: d.volumePath != nil ? .mountedByMacOS : .error,
                 mountPoint: d.volumePath, readOnly: true, notice: nil,
@@ -165,6 +197,13 @@ final class VolumeManager {
     var needsDiskAccess: Bool { unreadable.values.contains { likelyType($0) != nil } }
 
     private func changed() {
+        // Never claim "safe to unplug" for a disk with anything mounted or
+        // being worked on.
+        for whole in Array(ejected.keys) where diskInUse(whole) {
+            ejected.removeValue(forKey: whole)
+            Log.info("\(whole) is in use again; no longer listed as ejected")
+        }
+        saveEjected()
         onChange()
     }
 
@@ -182,6 +221,26 @@ final class VolumeManager {
     /// (formatting), so its volume name must not be trusted.
     private func diskAppeared(_ disk: DADisk, stale: Bool = false) {
         guard !shuttingDown, let d = DiskDescription(disk), !d.isNetwork, d.size > 0 else { return }
+        if d.bsdName == d.wholeBSDName { vanished.remove(d.bsdName) }
+        if var e = ejected[d.wholeBSDName], !e.info.mediaPresent {
+            if let id = e.deviceID, PhysicalDevice.id(forBSDName: d.wholeBSDName) == id {
+                // The same drive came back without being unplugged (some
+                // re-attach after an eject): it stays ejected.
+                e.info.mediaPresent = true
+                e.expires = nil
+                ejected[d.wholeBSDName] = e
+            } else {
+                // Connected again after unplugging, or another disk.
+                ejected.removeValue(forKey: d.wholeBSDName)
+            }
+            changed()
+        }
+        if beingEjected(d.wholeBSDName) {
+            // macOS re-announces partitions during an eject; probing them
+            // now would hold the disk open. Look at them afterwards.
+            deferredAppear[d.wholeBSDName, default: []].insert(d.bsdName)
+            return
+        }
         if d.isWhole && !d.isLeaf { return }          // partitioned disk
         guard d.mayHoldSupportedFS else { return }
         if let v = volumes[d.bsdName] {
@@ -191,6 +250,8 @@ final class VolumeManager {
         guard !probing.contains(d.bsdName) else { return }
         probing.insert(d.bsdName)
         let gen = generation[d.bsdName] ?? 0
+        // Re-announced during an eject: keep "unmounted by the user".
+        let carried = carriedUserUnmounted.removeValue(forKey: d.bsdName) ?? false
         work.async { [weak self] in
             guard let self else { return }
             let result = self.probe(d, trustVolumeName: !stale)
@@ -207,7 +268,7 @@ final class VolumeManager {
                 }
                 switch result {
                 case .found(let r):
-                    self.register(d, r)
+                    self.register(d, r, userUnmounted: carried)
                 case .notOurs, .denied:
                     // Not something we can handle (now): if we held back
                     // macOS's own NTFS driver, let it have the volume.
@@ -277,8 +338,7 @@ final class VolumeManager {
         changed()
         if first && needsDiskAccess {
             Log.warn("macOS denies raw disk access; FSMac needs Full Disk Access")
-            onMessage("FSMac Needs Full Disk Access",
-                      "macOS doesn't let FSMac read the disk you connected. Open FSMac in the menu bar to allow it.")
+            onMessage("FSMac Needs Full Disk Access", "Open the FSMac menu to allow it.")
         }
         guard accessRetry == nil else { return }
         // Access granted in System Settings applies at once; keep trying so
@@ -335,7 +395,7 @@ final class VolumeManager {
         return "ext2"
     }
 
-    private func register(_ d: DiskDescription, _ p: ProbeResult) {
+    private func register(_ d: DiskDescription, _ p: ProbeResult, userUnmounted: Bool = false) {
         releasedNative.remove(d.bsdName)
         unreadable.removeValue(forKey: d.bsdName)
         let policy = settings.policy(fsType: p.fsType, uuid: p.uuid)
@@ -343,17 +403,18 @@ final class VolumeManager {
             id: d.bsdName, wholeDisk: d.wholeBSDName, fsType: p.fsType, label: p.label,
             uuid: p.uuid, size: d.size,
             deviceName: d.deviceModel.isEmpty ? d.mediaName : d.deviceModel,
-            isInternal: d.isInternal, isEjectable: d.isEjectable || d.isRemovable,
+            isInternal: d.isInternal, isEjectable: d.isEjectable || d.isRemovable || !d.isInternal,
             isWritableMedia: d.isWritable,
             state: d.volumePath != nil ? .mountedByMacOS : .unmounted,
             mountPoint: d.volumePath, readOnly: d.volumePath != nil, notice: nil,
             error: nil, totalBytes: d.size, freeBytes: nil, policy: policy)
         let v = Volume(info: info)
+        // macOS may re-announce a disk's partitions while it is being
+        // ejected: they must not be mounted again behind the user's back.
+        if quiesced(d.wholeBSDName) || userUnmounted { v.userUnmounted = true }
         volumes[d.bsdName] = v
         if p.errors || !p.clean || p.needsRecovery {
-            v.info.notice = p.needsRecovery
-                ? "The journal needs to be replayed (the disk was not unmounted cleanly on Linux)."
-                : "The filesystem was not unmounted cleanly."
+            v.info.notice = "Not unmounted cleanly."
         }
         Log.info("found \(p.fsType) volume \(d.bsdName) '\(p.label)' (\(d.deviceModel), \(d.size >> 20) MB)")
         changed()
@@ -390,9 +451,20 @@ final class VolumeManager {
         guard let bsd = DADiskGetBSDName(disk).map({ String(cString: $0) }) else { return }
         generation[bsd, default: 0] += 1
         releasedNative.remove(bsd)
+        if beingEjected(bsd) { vanished.insert(bsd) }
         if unreadable.removeValue(forKey: bsd) != nil { changed() }
+        if var e = ejected[bsd], e.info.mediaPresent {
+            // The drive went away after the eject: unplugged, or a drive that
+            // detaches itself. Keep listing it while the USB device remains.
+            e.info.mediaPresent = false
+            if e.deviceID == nil { e.expires = Date().addingTimeInterval(120) }
+            if e.virtual { ejected.removeValue(forKey: bsd) } else { ejected[bsd] = e }
+            ensurePresenceTimer()
+            changed()
+        }
         guard let v = volumes.removeValue(forKey: bsd) else { return }
         v.gone = true
+        if beingEjected(v.info.wholeDisk) { carriedUserUnmounted[bsd] = v.userUnmounted }
         let wasMounted = v.info.state == .mounted
         let wasWritable = wasMounted && !v.info.readOnly
         let worker = v.worker
@@ -412,13 +484,16 @@ final class VolumeManager {
                 }
                 if let mp { q.async { self.reserved.remove(mp) } }
             }
-            Log.warn("\(bsd) '\(v.info.displayName)' disappeared while in use")
+            if ejecting.contains(v.info.wholeDisk) {
+                Log.info("\(bsd) '\(v.info.displayName)' was re-announced by macOS during the eject")
+            } else {
+                Log.warn("\(bsd) '\(v.info.displayName)' disappeared while in use")
+            }
         } else {
             Log.info("\(bsd) '\(v.info.displayName)' removed")
         }
         if wasWritable {
-            onMessage("Disk Not Ejected Properly",
-                      "Eject “\(v.info.displayName)” before disconnecting or turning it off.")
+            onMessage("Disk Not Ejected Properly", "“\(v.info.displayName)” was unplugged while mounted.")
         }
         changed()
     }
@@ -429,6 +504,7 @@ final class VolumeManager {
     /// volumes we are going to mount read-write ourselves.
     private func shouldBlockMount(_ disk: DADisk) -> String? {
         guard !shuttingDown, let d = DiskDescription(disk) else { return nil }
+        if quiesced(d.wholeBSDName) { return "This disk is being ejected" }
         // Recognised through our filesystem bundle; macOS cannot mount these.
         if d.volumeKind == "fsmac_ext" { return "FSMac mounts this volume" }
         guard d.volumeKind == "ntfs", !releasedNative.contains(d.bsdName) else { return nil }
@@ -454,7 +530,7 @@ final class VolumeManager {
     }
 
     private func autoAction(_ v: Volume) {
-        guard !shuttingDown, !v.busy, !v.userUnmounted else { return }
+        guard !shuttingDown, !v.busy, !v.userUnmounted, !quiesced(v.info.wholeDisk) else { return }
         let p = v.info.policy
         switch p.mode {
         case .ignore:
@@ -494,6 +570,7 @@ final class VolumeManager {
             }
             return completion(nil)
         }
+        if ejected.removeValue(forKey: v.info.wholeDisk) != nil { changed() }
         v.busy = true
         v.userUnmounted = false
         v.nativeAllowed = false
@@ -547,7 +624,7 @@ final class VolumeManager {
         if let d = watcher.describe(info.id), let path = d.volumePath {
             Log.info("unmounting the macOS mount of \(info.id) at \(path)")
             if let err = watcher.unmount(info.id) {
-                return "macOS could not release the volume (\(err)). Close any files on it and try again."
+                return "macOS couldn't release the volume: \(err)"
             }
         }
 
@@ -564,11 +641,11 @@ final class VolumeManager {
                 }
                 switch r.status {
                 case 0, 1, 2:
-                    if r.status != 0 { notice = "The filesystem was checked and repaired." }
+                    if r.status != 0 { notice = "Repaired by e2fsck." }
                     q.async { v.info.notice = nil }
                 default:
                     readOnly = true
-                    notice = "The filesystem has errors that need manual repair; it was mounted read-only. Use Check Disk to repair it."
+                    notice = "Has errors; mounted read-only. Use Check Disk."
                     Log.warn("e2fsck -p on \(info.id) exited with \(r.status)")
                 }
                 q.async { v.info.state = .mounting; self.changed() }
@@ -579,7 +656,7 @@ final class VolumeManager {
         var fd = open("/dev/r" + info.id, readOnly ? O_RDONLY : O_RDWR)
         if fd < 0 && !readOnly && (errno == EROFS || errno == EACCES || errno == EPERM) {
             readOnly = true
-            notice = "The disk is write-protected; it was mounted read-only."
+            notice = "Write-protected; mounted read-only."
             fd = open("/dev/r" + info.id, O_RDONLY)
         }
         guard fd >= 0 else {
@@ -630,6 +707,8 @@ final class VolumeManager {
         let ready = DispatchSemaphore(value: 0)
         q.sync {
             v.worker = worker
+            v.stoppedClean = false
+            if !readOnly { v.lastStopClean = false }
             v.readyEvent = nil
             v.readySignal = ready
             v.lastWorkerError = nil
@@ -645,11 +724,18 @@ final class VolumeManager {
         }
         let discard = {
             worker.stop()
-            if !worker.waitForExit(timeout: 60) {
+            var exited = worker.waitForExit(timeout: 60)
+            if !exited {
                 worker.kill9()
-                _ = worker.waitForExit(timeout: 5)
+                exited = worker.waitForExit(timeout: 5)
             }
-            self.q.sync { if v.worker === worker { v.worker = nil } }
+            // A read-write worker may have written (journal replay, the
+            // hibernation file) before it was abandoned.
+            let clean = exited && worker.exitStatus == 0 && self.q.sync { v.stoppedClean }
+            self.q.sync {
+                if v.worker === worker { v.worker = nil }
+                if !readOnly { v.lastStopClean = clean }
+            }
         }
 
         // 6. Wait for it to mount the filesystem (bitmaps of large volumes
@@ -695,6 +781,7 @@ final class VolumeManager {
             v.info.state = .mounted
             v.info.mountPoint = mountPoint.path
             v.info.readOnly = actualRO
+            if !actualRO { v.lastStopClean = false }
             v.info.label = label
             if let notice { v.info.notice = notice }
             return true
@@ -720,6 +807,8 @@ final class VolumeManager {
         case "ready":
             v.readyEvent = ev
             v.readySignal?.signal()
+        case "stopped":
+            v.stoppedClean = (ev["clean"] as? Bool) == true
         case "error":
             let msg = ev["message"] as? String ?? "unknown error"
             v.lastWorkerError = msg
@@ -745,6 +834,7 @@ final class VolumeManager {
         }
         guard v.info.state == .mounted else { return }
         // The worker went away while the volume was mounted.
+        if !v.info.readOnly { v.lastStopClean = false }
         let mp = v.info.mountPoint
         v.info.state = .error
         v.info.error = status == 4
@@ -882,6 +972,13 @@ final class VolumeManager {
         }
     }
 
+    /// Processes that hold volumes only briefly and let go by themselves.
+    private func isTransientHolder(_ name: String) -> Bool {
+        ["mds", "mds_stores", "mdworker", "mdworker_shared", "mdsync", "fseventsd", "Spotlight",
+         "quicklookd", "QuickLookUIService", "QuickLookSatellite", "revisiond", "diskimagesiod",
+         "com.apple.quicklook.ThumbnailsAgent", "ThumbnailExtension"].contains(name)
+    }
+
     /// Unmounts the NFS mount and stops the worker. Runs on `work` or the
     /// Disk Arbitration queue, never on `q`.
     private func stopVolume(_ v: Volume, mountPoint mp: String?, force: Bool) -> String? {
@@ -893,8 +990,18 @@ final class VolumeManager {
                 Thread.sleep(forTimeInterval: 1)
                 err = unmountPath(mp, force: false)
             }
+            // macOS background services (Spotlight, Quick Look, ...) let go
+            // of a volume after a few seconds; wait them out as Finder does.
+            let deadline = Date().addingTimeInterval(10)
+            var users: [String] = []
+            while err == "busy" && !force {
+                users = processesUsing(mp)
+                guard !users.isEmpty, users.allSatisfy(isTransientHolder), Date() < deadline else { break }
+                Thread.sleep(forTimeInterval: 0.5)
+                err = unmountPath(mp, force: false)
+            }
             if err == "busy" {
-                let users = processesUsing(mp)
+                if users.isEmpty { users = processesUsing(mp) }
                 return users.isEmpty
                     ? "The volume is in use."
                     : "The volume is in use by \(users.joined(separator: ", "))."
@@ -905,25 +1012,42 @@ final class VolumeManager {
         }
         if let worker = q.sync(execute: { v.worker }) {
             worker.stop()
-            if !worker.waitForExit(timeout: 120) {
+            var exited = worker.waitForExit(timeout: 120)
+            if !exited {
                 Log.error("\(id): worker did not exit; killing it")
                 worker.kill9()
-                _ = worker.waitForExit(timeout: 5)
+                exited = worker.waitForExit(timeout: 5)
             }
-            q.sync { if v.worker === worker { v.worker = nil } }
+            // Confirmed only by a clean exit after the worker's own report
+            // that it wrote everything and marked the filesystem clean.
+            let clean = exited && worker.exitStatus == 0 && q.sync { v.stoppedClean }
+            q.sync {
+                if v.worker === worker { v.worker = nil }
+                if !v.info.readOnly || !clean { v.lastStopClean = clean }
+            }
+            if !clean { Log.warn("\(id): worker exited with \(worker.exitStatus) without confirming a clean stop") }
         }
         Log.info("unmounted \(id) '\(name)'")
         return nil
     }
 
-    /// Unmounts every volume of a whole disk and ejects it.
-    func ejectDisk(_ whole: String, completion: @escaping (String?) -> Void) {
+    /// Ejects a disk the way Finder does, and verifies each step: every
+    /// FSMac volume is stopped and confirms its data is written, other
+    /// volumes are unmounted, the drive flushes its cache, and the disk is
+    /// ejected. `output` receives the steps. `announce` posts a notification
+    /// (for ejects not requested through FSMac's own interface).
+    func ejectDisk(_ whole: String, force: Bool = false, announce: Bool = false,
+                   output: @escaping (String) -> Void = { _ in },
+                   completion: @escaping (String?) -> Void) {
         let all = volumes.values.filter { $0.info.wholeDisk == whole }
+        if beingEjected(whole) { return completion("This disk is already being ejected.") }
         if all.contains(where: { $0.busy }) {
-            return completion("FSMac is busy with this disk. Try again in a moment.")
+            return completion("FSMac is busy with this disk.")
         }
         let ours = all.filter { $0.info.state == .mounted || $0.worker != nil }
         let targets = ours.map { ($0, $0.info.mountPoint, $0.info.displayName) }
+        let diskName = all.first.map { $0.info.deviceName.isEmpty ? whole : $0.info.deviceName } ?? whole
+        let volumeNames = all.map { $0.info.displayName }.sorted()
         for v in all { v.busy = true }
         for v in ours {
             v.userUnmounted = true
@@ -933,24 +1057,54 @@ final class VolumeManager {
         changed()
         work.async { [weak self] in
             guard let self else { return }
+            // Identify the physical device now: once ejected, the disk is gone.
+            let deviceID = PhysicalDevice.id(forBSDName: whole)
+            let virtual = self.watcher.describe(whole)?.isVirtual ?? false
             var failure: String?
             var stopped: Set<ObjectIdentifier> = []
             for (v, mp, name) in targets {
-                if let err = self.stopVolume(v, mountPoint: mp, force: false) {
+                output("Unmounting “\(name)”…")
+                if let err = self.stopVolume(v, mountPoint: mp, force: force) {
                     failure = "“\(name)”: \(err)"
                     break
                 }
                 stopped.insert(ObjectIdentifier(v))
+                output(self.q.sync { v.lastStopClean }
+                       ? "“\(name)”: written, marked clean"
+                       : "“\(name)”: unmounted, data NOT confirmed written")
+            }
+            var flushed = true
+            var mediaPresent = false
+            if failure == nil, let err = self.watcher.unmount(whole, whole: true, force: force) {
+                failure = "macOS could not unmount the other volumes on the disk: \(err)"
             }
             if failure == nil {
-                if let err = self.watcher.unmount(whole, whole: true) {
-                    failure = "macOS could not unmount the other volumes on the disk: \(err)"
-                } else if let err = self.watcher.eject(whole) {
-                    failure = "could not eject: \(err)"
+                if !virtual && !self.ctx.userMode {
+                    output("Flushing the drive cache…")
+                    flushed = flushDriveCache(whole, partitions: all.map { $0.info.id })
+                }
+                output("Ejecting…")
+                if let err = self.watcher.eject(whole) {
+                    failure = "macOS could not eject the disk: \(err)"
+                } else {
+                    // Many USB drives report a successful eject but stay
+                    // attached until they are unplugged.
+                    mediaPresent = !self.waitUntilGone(whole, timeout: 3)
                 }
             }
+            // What macOS still has mounted (normally nothing).
+            // A refused eject can leave native volumes mounted. Query them
+            // on failure too, including known volumes if enumeration changed.
+            let nativeMounted = Set((self.partitions(of: whole) + all.map { $0.info.id })
+                .filter { self.watcher.describe($0)?.volumePath != nil })
             self.q.async {
                 self.ejecting.remove(whole)
+                if self.vanished.remove(whole) != nil { mediaPresent = false }
+                for v in self.volumes.values where v.info.wholeDisk == whole && v.info.state == .mountedByMacOS
+                    && !nativeMounted.contains(v.info.id) {
+                    v.info.state = .unmounted
+                    v.info.mountPoint = nil
+                }
                 for v in all {
                     v.busy = false
                     if stopped.contains(ObjectIdentifier(v)) {
@@ -961,10 +1115,192 @@ final class VolumeManager {
                         self.unmountFailed(v)
                     }
                 }
+                if failure == nil, self.diskInUse(whole) {
+                    failure = "a volume on the disk was mounted or opened again while it was being ejected"
+                }
+                if failure == nil {
+                    let verified = all.allSatisfy { $0.lastStopClean }
+                    self.recordEjected(whole, name: diskName, volumes: volumeNames, deviceID: deviceID,
+                                       virtual: virtual, mediaPresent: mediaPresent, verified: verified,
+                                       flushed: flushed)
+                    Log.info("ejected \(whole) (\(mediaPresent ? "still attached" : "detached"), " +
+                             "\(verified ? "all data confirmed written" : "NOT all data confirmed"))")
+                    if announce {
+                        self.onMessage(verified && flushed ? "“\(diskName)” Can Be Unplugged" : "“\(diskName)” Was Ejected",
+                                       flushed ? self.ejectedSummary(verified: verified, mediaPresent: mediaPresent)
+                                           : "Drive cache flush not confirmed. Safe removal is not verified.")
+                    }
+                } else if announce, let failure {
+                    let why = failure.hasSuffix(".") ? String(failure.dropLast()) : failure
+                    self.onMessage("“\(diskName)” Was Not Ejected", "\(why). Not safe to unplug.")
+                }
                 self.changed()
-                if failure == nil { Log.info("ejected \(whole)") }
                 completion(failure)
+                if !self.beingEjected(whole) { self.releaseDeferred(whole) }
             }
+        }
+    }
+
+    private func ejectedSummary(verified: Bool, mediaPresent: Bool) -> String {
+        verified ? "All data written." : "Not all data confirmed written."
+    }
+
+    /// Waits for Disk Arbitration to report the disk gone (runs on `work`).
+    private func waitUntilGone(_ whole: String, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if watcher.describe(whole) == nil { return true }
+            Thread.sleep(forTimeInterval: 0.2)
+        } while Date() < deadline
+        return false
+    }
+
+    // MARK: - Ejected disks
+
+    /// Being ejected or ejected: nothing on the disk is mounted automatically.
+    private func quiesced(_ whole: String) -> Bool {
+        beingEjected(whole) || ejected[whole] != nil
+    }
+
+    private func beingEjected(_ whole: String) -> Bool {
+        ejecting.contains(whole) || externalEjects[whole] != nil
+    }
+
+    /// Anything on the disk mounted, in use or being worked on.
+    private func diskInUse(_ whole: String) -> Bool {
+        volumes.values.contains {
+            $0.info.wholeDisk == whole &&
+                ($0.busy || [.mounted, .mounting, .checking, .unmounting, .mountedByMacOS].contains($0.info.state))
+        }
+    }
+
+    private func externalEjectDone(_ whole: String) {
+        if let n = externalEjects[whole], n > 1 { externalEjects[whole] = n - 1 } else { externalEjects[whole] = nil }
+        if !beingEjected(whole) { releaseDeferred(whole) }
+    }
+
+    /// Looks at partitions announced during an eject, now that it is over.
+    /// What was carried over for re-announced partitions applies only to
+    /// this eject: a disk connected later starts afresh.
+    private func releaseDeferred(_ whole: String) {
+        let names = deferredAppear.removeValue(forKey: whole) ?? []
+        for name in names.sorted() {
+            if let disk = watcher.disk(bsdName: name) { diskAppeared(disk) }
+        }
+        for name in Array(carriedUserUnmounted.keys) where name == whole || name.hasPrefix(whole + "s") {
+            carriedUserUnmounted.removeValue(forKey: name)
+        }
+    }
+
+    /// Disks FSMac ejected that have not been unplugged yet.
+    func ejectedDisks() -> [EjectedDisk] {
+        ejected.values.map { $0.info }.sorted { $0.date > $1.date }
+    }
+
+    private func recordEjected(_ whole: String, name: String, volumes names: [String], deviceID: UInt64?,
+                               virtual: Bool, mediaPresent: Bool, verified: Bool, flushed: Bool) {
+        // A disk image that is gone has nothing left to unplug.
+        if virtual && !mediaPresent { return }
+        var warning: String?
+        if !verified {
+            warning = "Not all data confirmed written. Check the disk."
+        } else if !flushed {
+            warning = "Drive cache flush not confirmed. Safe removal is not verified."
+        }
+        let info = EjectedDisk(id: whole, name: name, volumes: names, date: Date(),
+                               mediaPresent: mediaPresent, verified: verified && flushed, warning: warning)
+        ejected[whole] = EjectRecord(info: info, deviceID: deviceID,
+                                     expires: deviceID == nil && !mediaPresent ? Date().addingTimeInterval(120) : nil,
+                                     virtual: virtual)
+        ensurePresenceTimer()
+    }
+
+    /// Ejected disks survive a restart of the helper (an update, a crash):
+    /// otherwise a drive that is still attached would be mounted again.
+    private struct SavedEject: Codable {
+        var info: EjectedDisk
+        var deviceID: UInt64
+    }
+
+    private var ejectedFile: URL { ctx.supportDir.appendingPathComponent("ejected.json") }
+
+    private func saveEjected() {
+        let saved = ejected.values.compactMap { r in r.deviceID.map { SavedEject(info: r.info, deviceID: $0) } }
+        guard let data = try? JSONEncoder().encode(saved), data != lastSavedEjected else { return }
+        lastSavedEjected = data
+        try? data.write(to: ejectedFile, options: .atomic)
+    }
+
+    /// Restores records whose drive is still attached (registry IDs are
+    /// unique until the next restart, so a match is the same drive).
+    private func loadEjected() {
+        guard let data = try? Data(contentsOf: ejectedFile),
+              let saved = try? JSONDecoder().decode([SavedEject].self, from: data) else { return }
+        lastSavedEjected = data
+        for e in saved where PhysicalDevice.isPresent(e.deviceID) {
+            if e.info.mediaPresent && PhysicalDevice.id(forBSDName: e.info.id) != e.deviceID { continue }
+            ejected[e.info.id] = EjectRecord(info: e.info, deviceID: e.deviceID, expires: nil)
+            Log.info("\(e.info.id) '\(e.info.name)' is still ejected")
+        }
+        ensurePresenceTimer()
+    }
+
+    private func ensurePresenceTimer() {
+        guard presenceTimer == nil, !ejected.isEmpty else { return }
+        let t = DispatchSource.makeTimerSource(queue: q)
+        t.schedule(deadline: .now() + 1, repeating: 1.5)
+        t.setEventHandler { [weak self] in self?.checkEjectedPresence() }
+        t.resume()
+        presenceTimer = t
+    }
+
+    /// Drops ejected disks once they are physically disconnected.
+    private func checkEjectedPresence() {
+        var any = false
+        for (whole, rec) in ejected {
+            var gone = false
+            if let id = rec.deviceID {
+                gone = !PhysicalDevice.isPresent(id)
+            } else if !rec.info.mediaPresent, let exp = rec.expires {
+                gone = Date() > exp
+            }
+            if gone {
+                ejected.removeValue(forKey: whole)
+                Log.info("\(whole) '\(rec.info.name)' was unplugged")
+                any = true
+            }
+        }
+        if ejected.isEmpty {
+            presenceTimer?.cancel()
+            presenceTimer = nil
+        }
+        if any { changed() }
+    }
+
+    /// Mounts the volumes of an ejected disk that is still connected.
+    func mountDisk(_ whole: String, readOnly: Bool = false, completion: @escaping (String?) -> Void) {
+        if let e = ejected[whole], !e.info.mediaPresent {
+            return completion("“\(e.info.name)” is offline; reconnect it to use it.")
+        }
+        let vs = volumes.values.filter { $0.info.wholeDisk == whole }
+        guard !vs.isEmpty else { return completion("\(whole) has no NTFS or ext volumes") }
+        if ejected.removeValue(forKey: whole) != nil { changed() }
+        var errors: [String] = []
+        let group = DispatchGroup()
+        for v in vs where v.info.policy.mode != .ignore && (v.info.state == .unmounted || v.info.state == .error) {
+            v.userUnmounted = false
+            if v.info.fsType == "ntfs" && v.info.policy.mode == .readOnly && !readOnly {
+                allowNative(v)
+                continue
+            }
+            group.enter()
+            mount(v.info.id, readOnly: readOnly || v.info.policy.mode == .readOnly) { err in
+                if let err { errors.append("“\(v.info.displayName)”: \(err)") }
+                group.leave()
+            }
+        }
+        group.notify(queue: q) {
+            completion(errors.isEmpty ? nil : errors.joined(separator: "\n"))
         }
     }
 
@@ -997,6 +1333,7 @@ final class VolumeManager {
         }
         guard case .stop(let all, let ours) = decision else {
             if case .refuse(let why) = decision { return why }
+            noteExternalEject(whole, virtual: d.isVirtual)
             return nil
         }
         var failure: String?
@@ -1021,8 +1358,51 @@ final class VolumeManager {
             }
             changed()
         }
-        if failure == nil { Log.info("unmounted the volumes of \(whole) for an eject request") }
+        if failure == nil {
+            Log.info("unmounted the volumes of \(whole) for an eject request")
+            noteExternalEject(whole, virtual: d.isVirtual)
+        }
         return failure
+    }
+
+    /// After someone else ejected a disk with FSMac volumes on it (Disk
+    /// Utility, `diskutil eject`), list it as ejected like FSMac's own ejects.
+    /// Runs on the Disk Arbitration queue, before the eject happens.
+    private func noteExternalEject(_ whole: String, virtual: Bool) {
+        // What is on the disk, captured now: once ejected it may be gone.
+        struct Snapshot { var name: String; var volumes: [String]; var verified: Bool }
+        let snap: Snapshot? = q.sync {
+            guard !ejecting.contains(whole) else { return nil }
+            let all = volumes.values.filter { $0.info.wholeDisk == whole }
+            guard let first = all.first else { return nil }
+            return Snapshot(name: first.info.deviceName.isEmpty ? whole : first.info.deviceName,
+                            volumes: all.map { $0.info.displayName }.sorted(),
+                            verified: all.allSatisfy { $0.lastStopClean })
+        }
+        guard let snap else { return }
+        let deviceID = PhysicalDevice.id(forBSDName: whole)
+        q.sync { externalEjects[whole, default: 0] += 1 }
+        work.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self else { return }
+            let present = self.watcher.describe(whole) != nil
+            // Only if the eject went through: nothing on the disk is mounted.
+            if present, self.partitions(of: whole).contains(where: { self.watcher.describe($0)?.volumePath != nil }) {
+                self.q.async { self.externalEjectDone(whole) }
+                return
+            }
+            self.q.async {
+                self.externalEjectDone(whole)
+                let gone = self.vanished.remove(whole) != nil
+                let all = self.volumes.values.filter { $0.info.wholeDisk == whole }
+                if all.contains(where: { $0.info.state == .mounted || $0.busy }) { return }
+                for v in all { v.userUnmounted = true }
+                self.recordEjected(whole, name: snap.name, volumes: snap.volumes, deviceID: deviceID,
+                                   virtual: virtual, mediaPresent: present && !gone, verified: snap.verified,
+                                   flushed: true)
+                Log.info("\(whole) was ejected by another app (\(present ? "still attached" : "detached"))")
+                self.changed()
+            }
+        }
     }
 
     /// Notices our volumes being unmounted by someone else (e.g. Finder's
@@ -1038,7 +1418,7 @@ final class VolumeManager {
             v.info.state = .unmounting
             changed()
             let whole = v.info.wholeDisk
-            let ejectable = v.info.isEjectable
+            let ejectable = v.info.isEjectable || !v.info.isInternal
             work.async { [weak self] in
                 guard let self else { return }
                 _ = self.stopVolume(v, mountPoint: nil, force: false)
@@ -1058,7 +1438,7 @@ final class VolumeManager {
                             ($0.info.state == .mounted || $0.info.state == .mountedByMacOS || $0.busy)
                     }
                     if self.settings.ejectWhenUnmounted && onlyOurs && !others && !self.shuttingDown {
-                        self.ejectDisk(whole) { err in
+                        self.ejectDisk(whole, announce: true) { err in
                             if let err { Log.warn("auto-eject of \(whole): \(err)") }
                         }
                     }
@@ -1127,19 +1507,17 @@ final class VolumeManager {
                 let r = runProgram(self.ctx.helper("ntfsfix"), repair ? ["-d", dev] : ["-n", dev],
                                    timeout: 3600, onLine: output)
                 if r.status == 0 {
-                    finish(nil, repair
-                        ? "The volume was checked and its journal reset. For a full repair, run chkdsk on Windows."
-                        : "No problems were found.")
+                    finish(nil, repair ? "Journal reset. For a full repair, use chkdsk on Windows." : "No problems found.")
                 } else {
-                    finish("ntfsfix reported problems (status \(r.status)). Run chkdsk /f on Windows to repair this volume.", nil)
+                    finish("Problems found (ntfsfix status \(r.status)); repair with chkdsk /f on Windows.", nil)
                 }
             } else {
                 let r = runProgram(self.ctx.helper("e2fsck"), repair ? ["-fy", dev] : ["-fn", dev],
                                    timeout: 4 * 3600, onLine: output)
                 switch r.status {
-                case 0: finish(nil, "No problems were found.")
-                case 1 where repair, 2 where repair: finish(nil, "Problems were found and repaired.")
-                case 4 where !repair: finish("The volume has errors. Use Repair to fix them.", nil)
+                case 0: finish(nil, "No problems found.")
+                case 1 where repair, 2 where repair: finish(nil, "Repaired.")
+                case 4 where !repair: finish("Errors found. Use Repair.", nil)
                 default: finish("e2fsck could not repair all problems (status \(r.status)).", nil)
                 }
             }
@@ -1182,6 +1560,7 @@ final class VolumeManager {
         }
         let target = d.bsdName
         let label = String(label.prefix(fsType == "ntfs" ? 32 : 16))
+        if ejected.removeValue(forKey: d.wholeBSDName) != nil { changed() }
         if let err = formatRefusal(d, force: force) { return completion(err) }
         let partitioned = d.isWhole && !d.isLeaf
         let affected = volumes.values.filter {
@@ -1257,11 +1636,11 @@ final class VolumeManager {
             // New partition table. diskutil creates an EFI system partition
             // (on larger disks) followed by the data partition, typed for
             // Windows.
-            output("Creating a GUID partition table on \(d.bsdName)…")
+            output("Partitioning \(d.bsdName)…")
             if let e = watcher.unmount(d.bsdName, whole: true) { return "cannot unmount the disk: \(e)" }
             let r = runProgram("/usr/sbin/diskutil",
                                ["eraseDisk", "ExFAT", "FSMACFORMAT", "GPT", "/dev/" + d.wholeBSDName],
-                               timeout: 600, onLine: output)
+                               timeout: 600)
             guard r.status == 0 else { return "partitioning failed (status \(r.status))" }
             bsd = dataPartition(of: d.wholeBSDName) ?? (d.wholeBSDName + "s2")
             if let e = watcher.unmount(bsd, force: true), watcher.describe(bsd)?.volumePath != nil {
@@ -1272,7 +1651,7 @@ final class VolumeManager {
         }
 
         let dev = "/dev/" + bsd
-        output("Creating \(fsType == "ntfs" ? "NTFS" : "ext4") volume “\(label)” on \(bsd)…")
+        output("Creating \(fsType == "ntfs" ? "NTFS" : "ext4") “\(label)” on \(bsd)…")
         let r: ProcessResult
         if fsType == "ntfs" {
             var args = ["-Q", "-F", "-L", label]
@@ -1281,14 +1660,16 @@ final class VolumeManager {
             let start: UInt64? = bsd == d.wholeBSDName ? 0
                 : partitionOffset(bsd).flatMap { $0.1 > 0 ? $0.0 / $0.1 : nil }
             if let start { args += ["-p", String(start), "-H", "255", "-S", "63"] }
-            r = runProgram(ctx.helper("mkntfs"), args + [dev], timeout: 3600, onLine: output)
+            r = runProgram(ctx.helper("mkntfs"), args + [dev], timeout: 3600)
         } else {
             r = runProgram(ctx.helper("mke2fs"),
                            ["-F", "-t", "ext4", "-L", label, "-E", "lazy_itable_init=1,lazy_journal_init=1", dev],
-                           timeout: 3600, onLine: output)
+                           timeout: 3600)
         }
-        guard r.status == 0 else { return "creating the filesystem failed (status \(r.status))" }
-        output("Done.")
+        guard r.status == 0 else {
+            let last = r.output.split(separator: "\n").last.map(String.init) ?? ""
+            return "creating the filesystem failed (status \(r.status))" + (last.isEmpty ? "" : ": \(last)")
+        }
         return nil
     }
 

@@ -814,10 +814,8 @@ static int ntfs_mount_vol(fsc_dev *dev, const fsc_mount_opts *o,
 	nv->base.readonly = NVolReadOnly(nv->vol) ? true : false;
 	if (nv->base.readonly && !(flags & NTFS_MNT_RDONLY))
 		snprintf(nv->notice, sizeof(nv->notice),
-			 "This volume is in use by a hibernated Windows or was "
-			 "not shut down cleanly (Fast Startup). It was mounted "
-			 "read-only to protect your data. Shut Windows down "
-			 "fully (Shift+Shut Down) to enable writing.");
+			 "Windows is hibernated (Fast Startup); mounted "
+			 "read-only.");
 
 	NVolSetCompression(nv->vol);
 	if (ntfs_set_shown_files(nv->vol, FALSE, TRUE, o->ntfs_hide_dot_files)) {
@@ -860,8 +858,7 @@ static int ntfs_mount_vol(fsc_dev *dev, const fsc_mount_opts *o,
 		if (root)
 			ntfs_inode_close(root);
 		snprintf(nv->notice, sizeof(nv->notice),
-			 "The Windows hibernation file was removed; Windows will "
-			 "start fresh next time.");
+			 "Windows hibernation data removed.");
 	}
 
 	fsc_info("ntfs: mounted '%s' (NTFS %u.%u, %u-byte clusters, %s)",

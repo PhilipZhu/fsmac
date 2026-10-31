@@ -21,10 +21,14 @@ the menu bar, mounts supported disks automatically and ejects them safely.
   forks, the "hidden" flag and Gatekeeper quarantine are kept. They are stored
   natively (NTFS named streams, ext4 `user.*` attributes), so copies on Windows
   and Linux keep them too, and there is no `._` clutter.
-- **Safe ejecting.** Eject from Finder, Disk Utility, the menu bar or the
-  command line. Data is flushed and the disk is marked clean before it is
-  released. If a disk is unplugged without ejecting, FSMac cleans up and tells
-  you.
+- **Safe ejecting you can see.** Eject from Finder, Disk Utility, the menu
+  bar or the command line. Every volume confirms that all its data was written
+  and that it was marked clean, the drive flushes its cache, and only then is
+  the disk shown as **Ejected · Safe to unplug**. It stays listed that way until
+  you unplug it; a drive that is still connected can be mounted again with one
+  click. If a volume is still in use, the menu says so: not ejected, not safe to
+  unplug, and which apps hold it. If a disk is unplugged without ejecting, FSMac
+  cleans up and tells you.
 - **Disk tools.** Check and repair volumes (`e2fsck`, `ntfsfix`), and erase
   disks or partitions as NTFS or ext4.
 - **Per-volume preferences.** Read & write, read-only, or ignore. Choose
@@ -71,7 +75,8 @@ FSMac at login**.
 | To… | Do this |
 | --- | --- |
 | Open a disk | Click it in Finder's sidebar, or click the folder button in the menu |
-| Eject | Finder's eject button, the menu's eject button, or `fsmac eject <name>` |
+| Eject | Finder's eject button, **Eject** next to the disk in the menu, or `fsmac eject <name>`. Unplug when the menu shows **Safe to unplug** |
+| Use an ejected disk again without unplugging it | **Mount Again** on its card in the menu, or `fsmac mount disk4` |
 | Mount read-only | Menu › **⋯** › **Mount Read-Only** (or **Remount Read-Only**) |
 | Never mount a disk automatically | **⋯** › **When Connected** › **Don't Mount Automatically** or **Ignore This Volume** |
 | Check or repair | **⋯** › **Check Disk…** |
@@ -84,7 +89,8 @@ Tool…**, or call `/Applications/FSMac.app/Contents/Helpers/fsmac`):
 fsmac list                       show NTFS and ext volumes
 fsmac mount <volume> [--read-only]
 fsmac unmount <volume> [--force]
-fsmac eject <volume|disk>
+fsmac eject <volume|disk> [--force]  shows each step and says whether it is safe to unplug
+fsmac mount <disk>               mount an ejected disk that is still connected
 fsmac check <volume> [--repair]
 fsmac format <disk> --type ntfs|ext4 --label NAME
 fsmac policy <volume> read-write|read-only|ignore|default [--no-auto-mount]
@@ -170,8 +176,8 @@ make dist       # build/dist/FSMac-<version>.dmg
 
 Development without installing anything: `build/bin/fsmacd --user-mode`
 runs the helper unprivileged. It handles disks you can open yourself, such as
-attached disk images, and mounts them under `~/FSMacVolumes`. The app and
-`fsmac` connect to it automatically.
+attached disk images, and mounts them in `FSMacVolumes` in your temporary
+folder (`$TMPDIR`). The app and `fsmac` connect to it automatically.
 
 ### Layout
 

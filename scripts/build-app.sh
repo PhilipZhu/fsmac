@@ -24,7 +24,7 @@ make -s ARCH="$ARCH" engine
 
 step "Building the Swift components"
 mkdir -p build/bin build/app
-swiftc "${SWIFT_FLAGS[@]}" -module-name fsmacd shared/Protocol.swift daemon/*.swift \
+swiftc "${SWIFT_FLAGS[@]}" -module-name fsmacd shared/Protocol.swift daemon/*.swift -framework IOKit \
     -framework DiskArbitration -framework SystemConfiguration -o build/bin/fsmacd
 swiftc "${SWIFT_FLAGS[@]}" -module-name fsmac shared/Protocol.swift shared/Client.swift cli/main.swift \
     -o build/bin/fsmac

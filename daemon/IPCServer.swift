@@ -154,6 +154,7 @@ final class IPCServer {
         var ev = Response(id: nil, ok: true)
         ev.event = Event.volumes
         ev.volumes = manager.snapshot()
+        ev.ejected = manager.ejectedDisks()
         broadcast(ev)
     }
 
@@ -215,12 +216,16 @@ final class IPCServer {
                 $0.admin = c.admin
             }
         case Command.list:
-            reply(nil) { $0.volumes = manager.snapshot() }
+            reply(nil) {
+                $0.volumes = manager.snapshot()
+                $0.ejected = manager.ejectedDisks()
+            }
             manager.refreshSpace()   // subscribers get the new figures
         case Command.subscribe:
             c.subscribed = true
             reply(nil) {
                 $0.volumes = manager.snapshot()
+                $0.ejected = manager.ejectedDisks()
                 $0.settings = manager.settings
             }
         case Command.mount:
@@ -243,7 +248,15 @@ final class IPCServer {
                     manager.volumes.values.first(where: { $0.info.wholeDisk == disk })?.info.wholeDisk else {
                 return reply("\(disk) has no NTFS or ext volumes")
             }
-            manager.ejectDisk(whole) { reply($0) }
+            if req.force == true && !needPrivileged("Ejecting a disk that is in use") { return }
+            manager.ejectDisk(whole, force: req.force ?? false, output: progress) { err in
+                // The record says whether the drive is still attached and
+                // whether every volume confirmed its data was written.
+                reply(err) { $0.ejected = self.manager.ejectedDisks().filter { $0.id == whole } }
+            }
+        case Command.mountDisk:
+            guard let disk = req.disk else { return reply("missing disk") }
+            manager.mountDisk(disk, readOnly: req.readOnly ?? false) { reply($0) }
         case Command.check:
             guard needAdmin() else { return }
             guard let disk = req.disk else { return reply("missing disk") }

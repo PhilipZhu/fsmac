@@ -90,7 +90,6 @@ struct VolumeRow: View {
                 } else if volume.policy.mode != .ignore || volume.state == .error {
                     IconButton(symbol: "play.circle", help: "Mount") { model.mount(volume) }
                 }
-                IconButton(symbol: "eject", help: "Eject “\(volume.displayName)”") { model.eject(volume) }
                 Menu {
                     moreMenu
                 } label: {
@@ -190,11 +189,7 @@ struct VolumeRow: View {
     private func confirmHibernation() {
         let alert = NSAlert()
         alert.messageText = "Discard Windows' hibernation data on “\(volume.displayName)”?"
-        alert.informativeText = """
-            Windows was hibernated or shut down with Fast Startup. Mounting the volume read & write \
-            deletes the saved Windows session; anything unsaved in it is lost. To avoid this, start \
-            Windows and shut it down fully (hold Shift while choosing Shut Down).
-            """
+        alert.informativeText = "Anything unsaved in the Windows session is lost."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Discard and Mount")
         alert.addButton(withTitle: "Cancel")

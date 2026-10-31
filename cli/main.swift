@@ -2,6 +2,9 @@
 
 import Foundation
 
+// Progress and results go to stdout, errors to stderr: keep them in order.
+setvbuf(stdout, nil, _IOLBF, 0)
+
 let usage = """
 usage: fsmac <command> [options]
 
@@ -9,7 +12,8 @@ Volumes:
   list [--json]                       show NTFS and ext volumes (default command)
   mount <volume> [--read-only] [--remove-hibernation]
   unmount <volume> [--force] [--eject]
-  eject <volume|disk>                 unmount everything on the disk and eject it
+  eject <volume|disk> [--force]       unmount everything on the disk, verify, eject it
+  mount <disk>                        mount an ejected disk that is still connected
   check <volume> [--repair]           check (or repair) the filesystem
   format <disk> --type ntfs|ext4 [--label NAME] [--force] [--yes]
                                       erase a partition or a whole disk
@@ -61,10 +65,7 @@ func connect() -> DaemonClient {
         c.onDisconnect = { fail("lost the connection to the FSMac helper") }
         return c
     } catch {
-        fail("""
-            the FSMac helper is not running.
-            Open FSMac.app to set it up, or run `sudo fsmac install-helper`.
-            """)
+        fail("the FSMac helper is not running (open FSMac.app to set it up)")
     }
 }
 
@@ -115,6 +116,20 @@ func stateText(_ v: VolumeInfo) -> String {
 
 func pad(_ s: String, _ n: Int) -> String {
     s.count >= n ? s : s + String(repeating: " ", count: n - s.count)
+}
+
+/// "disk4" or "/dev/disk4" (a whole disk), else nil.
+func wholeDiskName(_ name: String) -> String? {
+    let n = name.hasPrefix("/dev/") ? String(name.dropFirst(5)) : name
+    return n.range(of: #"^disk\d+$"#, options: .regularExpression) != nil ? n : nil
+}
+
+func printEjected(_ e: EjectedDisk) {
+    let what = e.volumes.isEmpty ? "" : " (\(e.volumes.joined(separator: ", ")))"
+    let connected = e.mediaPresent ? ", available to mount again" : ", reconnect to use again"
+    print(e.verified ? "✓ \(e.id) “\(e.name)”\(what): safe to unplug\(connected)"
+                     : "! \(e.id) “\(e.name)”\(what): ejected, not verified\(connected)")
+    if let w = e.warning { print("  \(w)") }
 }
 
 func printList(_ vols: [VolumeInfo]) {
@@ -220,13 +235,37 @@ switch command {
 case "list", "ls":
     let json = flag("--json")
     let c = connect()
-    let vols = volumes(c)
-    if json { printJSON(vols) } else { printList(vols) }
+    let r = call(c, .make(Command.list))
+    let ejected = r.ejected ?? []
+    let ejectedIDs = Set(ejected.map(\.id))
+    let vols = (r.volumes ?? []).filter { !ejectedIDs.contains($0.wholeDisk) }
+    if json {
+        printJSON(vols)
+    } else {
+        if !vols.isEmpty || ejected.isEmpty { printList(vols) }
+        if !ejected.isEmpty {
+            if !vols.isEmpty { print("") }
+            for e in ejected { printEjected(e) }
+        }
+    }
 
 case "mount":
     let ro = flag("--read-only", "-r")
     let hib = flag("--remove-hibernation")
     let c = connect()
+    if let name = args.first, let whole = wholeDiskName(name),
+       !volumes(c).contains(where: { $0.id == whole }) {
+        // A whole disk (not itself a volume): mount its volumes, e.g. after
+        // an eject.
+        call(c, .make(Command.mountDisk) {
+            $0.disk = whole
+            $0.readOnly = ro ? true : nil
+        })
+        for v in volumes(c) where v.wholeDisk == whole {
+            print("“\(v.displayName)”: \(stateText(v))\(v.mountPoint.map { " at \($0)" } ?? "")")
+        }
+        exit(0)
+    }
     let v = resolve(c, args.first)
     call(c, .make(Command.mount) {
         $0.disk = v.id
@@ -250,12 +289,32 @@ case "unmount", "umount":
     print(eject ? "Ejected “\(v.displayName)”." : "Unmounted “\(v.displayName)”.")
 
 case "eject":
+    let force = flag("--force", "-f")
     guard let name = args.first else { fail("missing volume or disk", code: 2) }
     let c = connect()
-    let n = name.hasPrefix("/dev/") ? String(name.dropFirst(5)) : name
-    let disk = n.range(of: #"^disk\d+$"#, options: .regularExpression) != nil ? n : resolve(c, name).id
-    call(c, .make(Command.eject) { $0.disk = disk })
-    print("Ejected \(disk). It is safe to disconnect it.")
+    let disk = wholeDiskName(name) ?? resolve(c, name).id
+    let sem = DispatchSemaphore(value: 0)
+    var res: Response!
+    c.send(.make(Command.eject) {
+        $0.disk = disk
+        $0.force = force
+    }, output: { line in
+        // Results only; "…" lines are progress for the menu.
+        if !line.hasSuffix("…") { print("  \(line)") }
+    }) { res = $0; sem.signal() }
+    sem.wait()
+    clientQueue.sync {}
+    if !res.ok {
+        var why = res.error ?? "unknown error"
+        if why.hasSuffix(".") { why.removeLast() }
+        fail("not ejected: \(why). Not safe to unplug.")
+    }
+    if let e = res.ejected?.first {
+        printEjected(e)
+    } else {
+        // Disk images have nothing to unplug once they are ejected.
+        print("Ejected \(disk).")
+    }
 
 case "check", "fsck":
     let repair = flag("--repair")
@@ -390,8 +449,7 @@ case "status":
     do {
         let c = try DaemonClient(queue: clientQueue)
         let r = call(c, .make(Command.hello))
-        print("FSMac helper \(r.version ?? "?") is running\(r.userMode == true ? " in user (development) mode" : "").")
-        print("Socket: \(FSMac.socketPath)")
+        print("FSMac helper \(r.version ?? "?") is running\(r.userMode == true ? " (development mode)" : "").")
     } catch {
         print("The FSMac helper is not running.")
         exit(1)

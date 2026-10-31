@@ -752,20 +752,19 @@ static const char *ro_reason(ext2_filsys fs)
 	struct ext2_super_block *s = fs->super;
 
 	if (s->s_state & EXT2_ERROR_FS)
-		return "the filesystem has errors and needs to be checked "
-		       "(Repair it with FSMac or run e2fsck on Linux)";
+		return "has errors (use Check Disk)";
 	if (ext2fs_has_feature_quota(s))
-		return "quota tracking is enabled";
+		return "quotas";
 	if (ext2fs_has_feature_verity(s))
-		return "fs-verity is enabled";
+		return "fs-verity";
 	if (ext2fs_has_feature_casefold(s))
-		return "case-folding is enabled";
+		return "case-folding";
 	if (ext2fs_has_feature_shared_blocks(s))
-		return "shared blocks are enabled";
+		return "shared blocks";
 	if (ext2fs_has_feature_journal_dev(s))
-		return "it is an external journal device";
+		return "journal device";
 	if (ext2fs_has_feature_journal(s) && s->s_journal_inum == 0)
-		return "the journal is on an external device";
+		return "external journal";
 	return NULL;
 }
 
@@ -795,8 +794,7 @@ static int ext4_mount_vol(fsc_dev *dev, const fsc_mount_opts *o,
 			   0, 0, &fsmac_io_manager, &fs);
 	if (err == EXT2_ET_RO_UNSUPP_FEATURE) {
 		snprintf(ev->notice, sizeof(ev->notice),
-			 "Mounted read-only: the filesystem uses features this "
-			 "version of FSMac cannot write.");
+			 "Uses features FSMac can't write; mounted read-only.");
 		rw = false;
 		err = ext2fs_open2(ev->devname, NULL, flags, 0, 0,
 				   &fsmac_io_manager, &fs);
@@ -824,14 +822,13 @@ static int ext4_mount_vol(fsc_dev *dev, const fsc_mount_opts *o,
 				}
 				rw = false;
 				snprintf(ev->notice, sizeof(ev->notice),
-					 "Mounted read-only: the journal could "
-					 "not be replayed. Repair is recommended.");
+					 "Journal not replayed; mounted read-only. "
+					 "Use Check Disk.");
 			}
 		} else {
 			rw = false;
 			snprintf(ev->notice, sizeof(ev->notice),
-				 "Mounted read-only without replaying the journal; "
-				 "recent changes made on Linux may be missing.");
+				 "Journal not replayed; mounted read-only.");
 		}
 	} else if (ext2fs_has_feature_journal(fs->super)) {
 		err = ext2fs_check_ext3_journal(fs);
@@ -843,7 +840,7 @@ static int ext4_mount_vol(fsc_dev *dev, const fsc_mount_opts *o,
 	if (why && rw) {
 		rw = false;
 		snprintf(ev->notice, sizeof(ev->notice),
-			 "Mounted read-only because %s.", why);
+			 "Mounted read-only: %s.", why);
 	}
 	if (!rw)
 		fs->flags &= ~EXT2_FLAG_RW;
@@ -861,8 +858,7 @@ static int ext4_mount_vol(fsc_dev *dev, const fsc_mount_opts *o,
 		dedup_setup(ev);
 		if (!(fs->super->s_state & EXT2_VALID_FS))
 			snprintf(ev->notice, sizeof(ev->notice),
-				 "This filesystem was not unmounted cleanly; "
-				 "checking it is recommended.");
+				 "Not unmounted cleanly.");
 		/* Clear the valid flag so an unclean detach forces a check. */
 		fs->super->s_mnt_count++;
 		ext2fs_set_tstamp(fs->super, s_mtime, time(NULL));

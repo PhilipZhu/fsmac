@@ -5,7 +5,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$ROOT/build/bin"
 WORK="$ROOT/build/test/daemon"
-VOLS="$HOME/FSMacVolumes"
+VOLS="$(getconf DARWIN_USER_TEMP_DIR)FSMacVolumes"   # the helper's mount root in user mode
 FAIL=0
 pass() { printf '  \033[32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '  \033[31mFAIL\033[0m %s\n' "$*"; FAIL=1; }
@@ -64,6 +64,23 @@ check "check (e2fsck -n)" "$BIN/fsmac" check DTestExt
 check "check (ntfsfix -n)" "$BIN/fsmac" check DTestNTFS
 check "mounted again after check" wait_state DTestNTFS mounted
 
+# A refused eject must preserve a native macOS mount and its mount point.
+check "switch NTFS to native read-only mounting" "$BIN/fsmac" policy DTestNTFS read-only
+check "NTFS mounted by macOS" wait_state DTestNTFS mountedByMacOS
+NATIVE_MP=$("$BIN/fsmac" list --json | python3 -I -c "import json,sys; print(next(v['mountPoint'] for v in json.load(sys.stdin) if v['label']=='DTestNTFS'))")
+sleep 60 3<"$NATIVE_MP/data.bin" &
+H=$!
+sleep 0.5
+if "$BIN/fsmac" eject "$N" > native-eject.txt 2>&1; then fail "native eject refused while in use"
+elif grep -q "Not safe to unplug" native-eject.txt; then pass "native eject refused with a clear verdict"
+else fail "native eject refused: $(cat native-eject.txt)"; fi
+check "native volume still reported mounted after refused eject" wait_state DTestNTFS mountedByMacOS
+check "native mount point preserved after refused eject" bash -c '
+    "$1" list --json | python3 -I -c "import json,sys; v=next(v for v in json.load(sys.stdin) if v[\"label\"]==\"DTestNTFS\"); sys.exit(0 if v.get(\"mountPoint\")==sys.argv[1] else 1)" "$2"' _ "$BIN/fsmac" "$NATIVE_MP"
+kill $H 2>/dev/null; wait $H 2>/dev/null
+check "restore NTFS policy" "$BIN/fsmac" policy DTestNTFS default
+check "NTFS mounted by FSMac again" wait_state DTestNTFS mounted
+
 # Two volumes with the same name get separate mount points.
 rm -f same1.img same2.img
 mkfile -n 64m same1.img; "$BIN/mke2fs" -q -F -t ext4 -L Same same1.img
@@ -72,7 +89,20 @@ S1=$(attach same1.img); S2=$(attach same2.img)
 mountpoints() { "$BIN/fsmac" list --json | python3 -I -c "import json,sys; print(len({v.get('mountPoint') for v in json.load(sys.stdin) if v['label']=='Same' and v['state']=='mounted'}))"; }
 for _ in $(seq 100); do [ "$(mountpoints)" = 2 ] && break; sleep 0.1; done
 check "same-named volumes mounted separately" test "$(mountpoints)" = 2
-"$BIN/fsmac" eject "$S1" >/dev/null; "$BIN/fsmac" eject "$S2" >/dev/null
+check "eject succeeds" bash -c '"$1" eject "$2" > eject.txt 2>&1' _ "$BIN/fsmac" "$S1"
+check "eject reports the detached image verdict" grep -Fxq "Ejected $S1." eject.txt
+check "eject confirms the data was written" grep -q "written, marked clean" eject.txt
+check "ejected disk image is gone" bash -c "! diskutil info $S1 >/dev/null 2>&1"
+# A volume with an open file: not ejected, and the verdict says so.
+MP2=$("$BIN/fsmac" list --json | python3 -I -c "import json,sys; print(next(v['mountPoint'] for v in json.load(sys.stdin) if v['wholeDisk']==sys.argv[1]))" "$S2")
+sleep 30 3<"$MP2/lost+found" &
+H=$!
+sleep 0.5
+if "$BIN/fsmac" eject "$S2" > eject2.txt 2>&1; then fail "eject refused while in use"
+elif grep -q "Not safe to unplug" eject2.txt; then pass "eject refused while in use, with a clear verdict"
+else fail "eject refused while in use: $(cat eject2.txt)"; fi
+kill $H 2>/dev/null; wait $H 2>/dev/null
+"$BIN/fsmac" eject "$S2" >/dev/null 2>&1
 rm -f same1.img same2.img
 
 # A Finder-style unmount must not eject a disk that has other volumes.

@@ -2,8 +2,8 @@
 //
 // Normally started by launchd as root (com.fsmac.daemon). With --user-mode
 // it runs unprivileged for development and testing: it then only handles
-// disks the current user can open (attached disk images) and mounts them
-// below ~/FSMacVolumes.
+// disks the current user can open (attached disk images) and mounts them in
+// FSMacVolumes in the user's temporary folder ($TMPDIR).
 
 import Foundation
 

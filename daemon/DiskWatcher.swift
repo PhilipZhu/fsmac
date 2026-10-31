@@ -22,6 +22,10 @@ struct DiskDescription {
     var volumePath: String?
     var deviceModel: String
     var mediaName: String
+    var deviceProtocol: String
+
+    /// A disk image or other virtual device (nothing to unplug).
+    var isVirtual: Bool { deviceProtocol == "Disk Image" || deviceProtocol == "Virtual Interface" }
 
     init?(_ disk: DADisk) {
         guard let cf = DADiskCopyDescription(disk) as? [CFString: Any],
@@ -47,6 +51,7 @@ struct DiskDescription {
         deviceModel = ((cf[kDADiskDescriptionDeviceModelKey] as? String) ?? "")
             .trimmingCharacters(in: .whitespaces)
         mediaName = (cf[kDADiskDescriptionMediaNameKey] as? String) ?? ""
+        deviceProtocol = (cf[kDADiskDescriptionDeviceProtocolKey] as? String) ?? ""
         if let whole = DADiskCopyWholeDisk(disk), let wb = DADiskGetBSDName(whole) {
             wholeBSDName = String(cString: wb)
         } else {

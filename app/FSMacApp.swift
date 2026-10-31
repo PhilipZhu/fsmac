@@ -54,6 +54,9 @@ struct FSMacApp: App {
         if model.connection == .unavailable { return "externaldrive.badge.exclamationmark" }
         if model.volumes.contains(where: { $0.state == .error }) { return "externaldrive.badge.exclamationmark" }
         if model.volumes.contains(where: { $0.state == .mounted }) { return "externaldrive.fill" }
+        if !model.ejected.isEmpty {
+            return model.ejected.allSatisfy(\.verified) ? "externaldrive.badge.checkmark" : "externaldrive.badge.exclamationmark"
+        }
         return "externaldrive"
     }
 }

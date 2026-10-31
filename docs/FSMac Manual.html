@@ -242,13 +242,13 @@ footer.end { border-top: 1px solid var(--line); padding-top: 18px; color: var(--
 
 <header class="masthead">
   <div class="masthead-inner">
-    <div class="eyebrow">FSMac 1.0.2 · user and technical manual</div>
+    <div class="eyebrow">FSMac 1.0.3 · user and technical manual</div>
     <h1>FSMac Manual</h1>
     <p class="lede">FSMac lets a Mac read and write Windows (NTFS) and Linux (ext2, ext3, ext4) disks. Connect one and it appears in Finder, ready to use, and ejects like any other disk.</p>
     <ul class="facts" aria-label="Product facts">
       <li><span class="k">Formats</span><span class="v">NTFS · ext2 · ext3 · ext4</span></li>
       <li><span class="k">Requires</span><span class="v">macOS 14 or later, Apple silicon</span></li>
-      <li><span class="k">Download</span><span class="v">FSMac-1.0.2.dmg, 4.5 MB</span></li>
+      <li><span class="k">Download</span><span class="v">FSMac-1.0.3.dmg, 4.5 MB</span></li>
       <li><span class="k">License</span><span class="v">GNU GPL v2</span></li>
     </ul>
   </div>
@@ -323,7 +323,14 @@ footer.end { border-top: 1px solid var(--line); padding-top: 18px; color: var(--
         <dt>Mounting</dt>
         <dd>Automatic when a disk is connected. Volumes appear at <code>/Volumes/&lt;name&gt;</code>. Two volumes with the same name get <code>Name</code> and <code>Name 1</code>.</dd>
         <dt>Ejecting</dt>
-        <dd>Use Finder's eject button, the eject button in the menu bar window, Disk Utility, or <code>fsmac eject</code>. FSMac writes everything out, marks the volume clean and then ejects the disk. If the disk also holds a volume macOS mounted itself (for example an exFAT partition), unmounting the FSMac volume in Finder leaves the disk attached; eject the disk from Finder as usual.</dd>
+        <dd>Use Finder's eject button, <b>Eject</b> next to the disk in the menu bar window, Disk Utility, or <code>fsmac eject</code>. FSMac checks every step before it says the disk is safe:
+          <ol>
+            <li>each volume is unmounted and confirms that all its data was written and that it was marked clean;</li>
+            <li>any other volume on the disk is unmounted;</li>
+            <li>the drive is asked to write its own cache to the disk;</li>
+            <li>the disk is ejected.</li>
+          </ol>
+          The menu then shows the disk as <span class="chip on">Safe to unplug</span> until you unplug it. Many USB drives stay connected after an eject until the cable is pulled; for those the card also offers <b>Mount Again</b>. If the disk also holds a volume macOS mounted itself (for example an exFAT partition), unmounting the FSMac volume in Finder leaves the disk attached; eject the disk from Finder as usual.</dd>
         <dt>Files in use</dt>
         <dd>A volume with open files is not unmounted. FSMac tells you which apps hold it, for example <i>The volume is in use by Preview.</i></dd>
         <dt>Unplugging</dt>
@@ -335,7 +342,7 @@ footer.end { border-top: 1px solid var(--line); padding-top: 18px; color: var(--
 
     <section id="menu">
       <h2>The menu bar window</h2>
-      <p>Click the drive icon in the menu bar. Volumes are grouped by physical disk. Each row shows the name, format, free space and state, with buttons to open the volume in Finder, mount or eject it, and a <b>⋯</b> menu for everything else.</p>
+      <p>Click the drive icon in the menu bar. Volumes are grouped by physical disk, with an <b>Eject</b> button next to each disk's name; while a disk is being ejected, the current step is shown there. Each row shows the volume's name, format, free space and state, with buttons to open it in Finder or mount it, and a <b>⋯</b> menu for everything else.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>State</th><th>Meaning</th></tr></thead>
         <tbody>
@@ -346,6 +353,15 @@ footer.end { border-top: 1px solid var(--line); padding-top: 18px; color: var(--
           <tr><td><span class="chip off">Ignored</span></td><td>Set to <b>Ignore This Volume</b>; FSMac leaves it alone.</td></tr>
           <tr><td><span class="chip off">Checking…</span></td><td>A filesystem check is running, before mounting or on request.</td></tr>
           <tr><td><span class="chip err">Error</span></td><td>Mounting failed or the disk stopped responding. The message explains what happened; <b>Mount</b> tries again.</td></tr>
+        </tbody>
+      </table></div>
+      <p>After an eject, the disk is shown as a card instead of its volumes:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Card</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip on">Safe to unplug</span></td><td>Every volume confirmed that its data was written, and the disk was ejected. <i>Still connected</i> means the drive stays attached until you unplug it; <b>Mount Again</b> brings it back without unplugging. The card disappears when you unplug the drive.</td></tr>
+          <tr><td><span class="chip ro">Ejected, not verified</span></td><td>The disk was ejected, but a volume could not confirm that all its data was written, usually because the disk reported an error. Check the disk before relying on its contents.</td></tr>
+          <tr><td><span class="chip err">Not ejected</span></td><td>Shown under the disk when a volume is still in use. It is <b>not</b> safe to unplug; the message names the apps holding it. <b>Try Again</b> once they are closed, or <b>Eject Anyway…</b>, which makes those apps lose unsaved changes.</td></tr>
         </tbody>
       </table></div>
       <h3>The ⋯ menu</h3>
@@ -408,7 +424,8 @@ disk4s3  ext4  linux-home      31 GB free of 512.11 GB mounted  /Volumes/linux-h
           <tr><td><code>fsmac list [--json]</code></td><td>NTFS and ext volumes, their state and free space. This is the default command.</td></tr>
           <tr><td><code>fsmac mount &lt;volume&gt; [--read-only]</code></td><td>Mount. <code>--remove-hibernation</code> discards Windows' hibernation data and mounts read &amp; write.</td></tr>
           <tr><td><code>fsmac unmount &lt;volume&gt; [--force] [--eject]</code></td><td>Unmount; optionally eject the disk afterwards.</td></tr>
-          <tr><td><code>fsmac eject &lt;volume|disk&gt;</code></td><td>Unmount everything on the disk and eject it.</td></tr>
+          <tr><td><code>fsmac eject &lt;volume|disk&gt; [--force]</code></td><td>Unmount everything on the disk and eject it, printing each step. It ends with <i>safe to unplug</i>, or with <i>not ejected: … Not safe to unplug</i> (exit status 1).</td></tr>
+          <tr><td><code>fsmac mount &lt;disk&gt;</code></td><td>Mount an ejected disk that is still connected, e.g. <code>fsmac mount disk4</code>.</td></tr>
           <tr><td><code>fsmac check &lt;volume&gt; [--repair]</code></td><td>Check or repair, printing the tool's output.</td></tr>
           <tr><td><code>fsmac format &lt;disk&gt; --type ntfs|ext4 --label NAME</code></td><td>Erase a partition (<code>disk4s2</code>) or a whole disk (<code>disk4</code>). Asks you to type the device name unless <code>--yes</code> is given.</td></tr>
           <tr><td><code>fsmac policy &lt;volume&gt; read-write|read-only|ignore|default</code></td><td>Remember how to handle this volume. Add <code>--no-auto-mount</code> to mount it only on request.</td></tr>
@@ -483,8 +500,8 @@ fsmac config ntfsMode read-only</pre><button class="copy" type="button">Copy</bu
         <li><b>Apple silicon only.</b> This build is not universal.</li>
         <li><b>Not notarized.</b> On a Mac other than the one it was built on, the first launch needs Control-click › Open.</li>
       </ul>
-      <div class="note"><span class="label">Release status, 1.0.2</span>
-        <p>Tested on macOS 27 with disk images: every NTFS and ext code path, the helper's lifecycle, and the app. With a real USB drive (NTFS and ext4 partitions), mounting read &amp; write and reading through the installed helper have been verified. Writing to a real drive, the <code>fsmac_ext.fs</code> component that keeps macOS from calling ext disks unreadable, and unplugging a drive without ejecting have not yet been verified on real hardware.</p>
+      <div class="note"><span class="label">Release status, 1.0.3</span>
+        <p>Tested on macOS 27 with disk images: every NTFS and ext code path, the helper's lifecycle, and the app. With a real USB drive (NTFS and ext4 partitions), mounting read &amp; write, reading, and ejecting from FSMac, from Finder and with <code>diskutil eject</code> (including Mount Again) have been verified through the installed helper. Writing to a real drive, noticing that an ejected drive was unplugged, the <code>fsmac_ext.fs</code> component that keeps macOS from calling ext disks unreadable, and unplugging a drive without ejecting have not yet been verified on real hardware.</p>
       </div>
     </section>
 
@@ -515,7 +532,11 @@ fsmac config ntfsMode read-only</pre><button class="copy" type="button">Copy</bu
       </div></details>
 
       <details class="faq"><summary>Eject says the volume is in use</summary><div>
-        <p>Quit or close the apps named in the message, including Terminal windows whose current folder is on the volume, then eject again. <b>Force Unmount</b> works too, but apps lose unsaved changes to files on the volume.</p>
+        <p>The disk was not ejected and it is not safe to unplug it. Quit or close the apps named in the message, including Terminal windows whose current folder is on the volume, then click <b>Try Again</b>. <b>Eject Anyway…</b> works too, but those apps lose unsaved changes to files on the volume. Spotlight and Quick Look are waited for automatically.</p>
+      </div></details>
+
+      <details class="faq"><summary>The disk is still listed after ejecting</summary><div>
+        <p>That is normal for many USB drives: they stay connected until you unplug them. The card says <b>Safe to unplug</b>, so unplug it whenever you like, or click <b>Mount Again</b> to keep using it.</p>
       </div></details>
 
       <details class="faq"><summary>macOS says a Linux disk “was not readable”</summary><div>
@@ -644,7 +665,7 @@ rsize=1048576,wsize=1048576,readahead=32,nordirplus,nodev,nosuid,mutejukebox,res
       <div class="code"><pre>make            # libraries, engine, worker, tools and build/FSMac.app
 make test       # the full test suite
 make dist       # build/dist/FSMac-&lt;version&gt;.dmg</pre><button class="copy" type="button">Copy</button></div>
-      <p>The app is signed with the first <i>Developer ID Application</i> or <i>Apple Development</i> identity found; set <code>SIGN_IDENTITY</code> to choose one. To develop without installing anything, run the helper unprivileged. It then handles disks you can open yourself, such as attached disk images, and mounts them under <code>~/FSMacVolumes</code>; the app and CLI connect to it automatically.</p>
+      <p>The app is signed with the first <i>Developer ID Application</i> or <i>Apple Development</i> identity found; set <code>SIGN_IDENTITY</code> to choose one. To develop without installing anything, run the helper unprivileged. It then handles disks you can open yourself, such as attached disk images, and mounts them in <code>FSMacVolumes</code> in your temporary folder (<code>$TMPDIR</code>); the app and CLI connect to it automatically.</p>
       <div class="code"><pre>build/bin/fsmacd --user-mode
 hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount disk.img</pre><button class="copy" type="button">Copy</button></div>
       <dl class="defs small">
@@ -674,7 +695,7 @@ hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount disk.img</pre><b
         <li><b>ntfs-3g</b> (2026.9.28), the NTFS implementation and <code>mkntfs</code>, <code>ntfsfix</code>, <code>ntfslabel</code>. GPL v2 or later.</li>
         <li><b>e2fsprogs</b> (1.47.4), with libext2fs, journal recovery, <code>mke2fs</code>, <code>e2fsck</code> and <code>tune2fs</code>. GPL v2, with LGPL, BSD and MIT-licensed libraries.</li>
       </ul>
-      <footer class="end">FSMac 1.0.2 · Manual for macOS 14 and later on Apple silicon.</footer>
+      <footer class="end">FSMac 1.0.3 · Manual for macOS 14 and later on Apple silicon.</footer>
     </section>
   </main>
 </div>

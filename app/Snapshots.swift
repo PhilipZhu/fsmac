@@ -7,6 +7,14 @@ import SwiftUI
 extension AppModel {
     /// Sample data covering the interesting states.
     func loadSampleData() {
+        if ProcessInfo.processInfo.environment["FSMAC_SNAPSHOTS_EJECT"] == "only" {
+            // A drive whose media went away after the eject: only its card.
+            setPreview(volumes: [], ejected: [
+                EjectedDisk(id: "disk5", name: "Samsung T7", volumes: ["Windows Backup", "linux-home"],
+                            date: Date(), mediaPresent: false, verified: true, warning: nil),
+            ])
+            return
+        }
         func vol(_ id: String, _ whole: String, _ type: String, _ label: String, _ dev: String,
                  _ state: VolumeState, ro: Bool = false, total: UInt64 = 0, free: UInt64 = 0,
                  notice: String? = nil, error: String? = nil) -> VolumeInfo {
@@ -25,7 +33,7 @@ extension AppModel {
                 total: 512_110_190_592, free: 31_000_000_000),
             vol("disk6s1", "disk6", "ntfs", "GAMES", "WD Elements", .mounted, ro: true,
                 total: 2_000_398_934_016, free: 800_000_000_000,
-                notice: "This volume is in use by a hibernated Windows or was not shut down cleanly (Fast Startup). It was mounted read-only to protect your data."),
+                notice: "Windows is hibernated (Fast Startup); mounted read-only."),
             vol("disk7s1", "disk7", "ext4", "rootfs", "SanDisk Ultra", .unmounted),
         ] + (ProcessInfo.processInfo.environment["FSMAC_SNAPSHOTS_ACCESS"] != nil ? [
             {
@@ -34,7 +42,15 @@ extension AppModel {
                 v.needsPermission = true
                 return v
             }(),
-        ] : []))
+        ] : []),
+        ejected: ProcessInfo.processInfo.environment["FSMAC_SNAPSHOTS_EJECT"] != nil ? [
+            EjectedDisk(id: "disk12", name: "Elements 25A2", volumes: ["NTFS(625GB)", "Ext4(275GB)"],
+                        date: Date(), mediaPresent: true, verified: true, warning: nil),
+        ] : [],
+        progress: ProcessInfo.processInfo.environment["FSMAC_SNAPSHOTS_EJECT"] != nil
+            ? ["disk4": "“Windows Backup”: written, marked clean"] : [:],
+        errors: ProcessInfo.processInfo.environment["FSMAC_SNAPSHOTS_EJECT"] != nil
+            ? ["disk6": "“GAMES”: The volume is in use by Preview, Terminal."] : [:])
     }
 }
 

@@ -21,13 +21,13 @@ struct WelcomeView: View {
                 .frame(width: 88, height: 88)
             VStack(spacing: 4) {
                 Text("Welcome to FSMac").font(.title.bold())
-                Text("Use Windows (NTFS) and Linux (ext4) disks like any other Mac disk.")
+                Text("Read and write NTFS and ext4 disks.")
                     .foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 14) {
                 Step(number: 1, done: installed || model.helper == .requiresApproval,
                      title: "Install the FSMac helper",
-                     detail: "A small background service that mounts NTFS and ext disks.") {
+                     detail: "") {
                     if !installed && model.helper != .requiresApproval {
                         HStack {
                             Button("Install Helper") { model.installHelper() }
@@ -38,20 +38,20 @@ struct WelcomeView: View {
                 }
                 Step(number: 2, done: running,
                      title: "Allow it in System Settings",
-                     detail: "Turn on FSMac under Login Items & Extensions › Allow in the Background.") {
+                     detail: "Login Items & Extensions › Allow in the Background") {
                     if model.helper == .requiresApproval && !running {
                         Button("Open System Settings") { SMAppService.openSystemSettingsLoginItems() }
                             .buttonStyle(.borderedProminent)
                     } else if installed && !running {
                         HStack(spacing: 6) {
                             ProgressView().controlSize(.small)
-                            Text("Waiting for the helper to start…").font(.caption).foregroundStyle(.secondary)
+                            Text("Waiting for the helper…").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
                 Step(number: 3, done: running && !model.volumes.isEmpty,
                      title: "Connect a disk",
-                     detail: "It appears in Finder, ready to read and write. Eject it from Finder or the menu bar as usual.") {
+                     detail: "") {
                     EmptyView()
                 }
             }
@@ -72,9 +72,6 @@ struct WelcomeView: View {
                 Button(running ? "Done" : "Later") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
-            Text("FSMac lives in the menu bar \(Image(systemName: "externaldrive")).")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .padding(24)
         .frame(width: 500)
@@ -102,8 +99,10 @@ private struct Step<Accessory: View>: View {
             .frame(width: 24, height: 24)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.headline)
-                Text(detail).font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if !detail.isEmpty {
+                    Text(detail).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 accessory()
             }
         }

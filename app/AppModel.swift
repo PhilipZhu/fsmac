@@ -16,6 +16,12 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var connection: Connection = .connecting
     @Published private(set) var volumes: [VolumeInfo] = []
+    /// Disks FSMac ejected that have not been unplugged yet.
+    @Published private(set) var ejected: [EjectedDisk] = []
+    /// Whole disk → the step an eject in progress is at.
+    @Published private(set) var ejectProgress: [String: String] = [:]
+    /// Whole disk → why the last eject failed (the disk is still in use).
+    @Published private(set) var ejectErrors: [String: String] = [:]
     @Published private(set) var settings = Settings()
     @Published private(set) var daemonVersion: String?
     @Published private(set) var userMode = false
@@ -66,6 +72,7 @@ final class AppModel: ObservableObject {
                     guard let self, r.ok else { return }
                     self.connection = .connected
                     self.volumes = r.volumes ?? []
+                    self.ejected = r.ejected ?? []
                     self.announcedMounts = Set(self.volumes.filter { $0.state == .mounted }.map(\.id))
                     if let s = r.settings { self.settings = s }
                     self.retryTimer?.invalidate()
@@ -102,12 +109,16 @@ final class AppModel: ObservableObject {
         case Event.volumes:
             let vols = ev.volumes ?? []
             for v in vols where v.state == .mounted && !announcedMounts.contains(v.id) {
-                Notifier.post(title: "“\(v.displayName)” is ready",
-                              body: "\(v.fsDisplayName) volume mounted\(v.readOnly ? " read-only" : "") at \(v.mountPoint ?? "").",
+                Notifier.post(title: "“\(v.displayName)” mounted",
+                              body: (v.mountPoint ?? "") + (v.readOnly ? " (read-only)" : ""),
                               id: "mounted-\(v.id)")
             }
             announcedMounts = Set(vols.filter { $0.state == .mounted }.map(\.id))
             volumes = vols
+            ejected = ev.ejected ?? []
+            // Forget errors about disks that are gone.
+            let present = Set(vols.map(\.wholeDisk))
+            ejectErrors = ejectErrors.filter { present.contains($0.key) }
         case Event.notify:
             Notifier.post(title: ev.title ?? "FSMac", body: ev.message ?? "", id: nil)
         default:
@@ -150,13 +161,47 @@ final class AppModel: ObservableObject {
         }, disk: v.id)
     }
 
-    func eject(_ v: VolumeInfo) {
-        request(.make(Command.eject) { $0.disk = v.wholeDisk }, disk: v.id, then: { r in
-            if r.ok {
-                Notifier.post(title: "“\(v.displayName)” ejected",
-                              body: "It is safe to disconnect the disk.", id: "ejected-\(v.wholeDisk)")
+    func eject(_ v: VolumeInfo, force: Bool = false) {
+        ejectDisk(v.wholeDisk, force: force)
+    }
+
+    /// Ejects a whole disk, following its steps; the outcome stays visible
+    /// in the menu (ejected, or the reason it is not safe to unplug).
+    func ejectDisk(_ whole: String, force: Bool = false) {
+        guard let client, ejectProgress[whole] == nil else { return }
+        ejectErrors[whole] = nil
+        ejectProgress[whole] = "Preparing to eject…"
+        client.send(.make(Command.eject) {
+            $0.disk = whole
+            $0.force = force
+        }, output: { [weak self] line in
+            MainActor.assumeIsolated { self?.ejectProgress[whole] = line }
+        }) { [weak self] r in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.ejectProgress[whole] = nil
+                guard r.ok else {
+                    self.ejectErrors[whole] = r.error ?? "The disk could not be ejected."
+                    return
+                }
+                if let e = r.ejected?.first {
+                    if !self.ejected.contains(where: { $0.id == e.id }) { self.ejected.append(e) }
+                    Notifier.post(title: e.verified ? "“\(e.name)” can be unplugged" : "“\(e.name)” was ejected",
+                                  body: e.verified ? "All data written." : (e.warning ?? "Not all data confirmed written."),
+                                  id: "ejected-\(whole)")
+                }
             }
-        })
+        }
+    }
+
+    /// Mounts an ejected disk that is still connected.
+    func mountDisk(_ whole: String) {
+        ejectErrors[whole] = nil
+        request(.make(Command.mountDisk) { $0.disk = whole }, disk: whole)
+    }
+
+    func dismissEjectError(_ whole: String) {
+        ejectErrors[whole] = nil
     }
 
     func check(_ diskID: String, repair: Bool, output: @escaping (String) -> Void,
@@ -201,9 +246,13 @@ final class AppModel: ObservableObject {
     }
 
     /// Shows fixed data instead of the daemon's (snapshots).
-    func setPreview(volumes: [VolumeInfo]) {
+    func setPreview(volumes: [VolumeInfo], ejected: [EjectedDisk] = [],
+                    progress: [String: String] = [:], errors: [String: String] = [:]) {
         connection = .connected
         self.volumes = volumes
+        self.ejected = ejected
+        ejectProgress = progress
+        ejectErrors = errors
         announcedMounts = Set(volumes.map(\.id))
         daemonVersion = FSMac.version
     }

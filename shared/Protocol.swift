@@ -7,7 +7,7 @@
 import Foundation
 
 public enum FSMac {
-    public static let version = "1.0.2"
+    public static let version = "1.0.3"
     public static let daemonLabel = "com.fsmac.daemon"
     public static let appBundleID = "com.fsmac.FSMac"
     public static let systemSocketPath = "/var/run/fsmac.sock"
@@ -162,6 +162,34 @@ public struct VolumeInfo: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// A disk FSMac has ejected and that may still be plugged in. It is listed
+/// until it is physically disconnected.
+public struct EjectedDisk: Codable, Identifiable, Hashable, Sendable {
+    public var id: String               // whole disk, e.g. disk4
+    public var name: String             // device name, e.g. "Elements 25A2"
+    public var volumes: [String]        // names of the volumes that were on it
+    public var date: Date
+    /// The disk is still attached (many USB drives stay attached after an
+    /// eject until they are unplugged); it can be mounted again.
+    public var mediaPresent: Bool
+    /// Every FSMac volume on the disk confirmed that all its data was
+    /// written and that it was marked clean, and any requested drive cache
+    /// flush succeeded.
+    public var verified: Bool
+    public var warning: String?
+
+    public init(id: String, name: String, volumes: [String], date: Date, mediaPresent: Bool,
+                verified: Bool, warning: String?) {
+        self.id = id
+        self.name = name
+        self.volumes = volumes
+        self.date = date
+        self.mediaPresent = mediaPresent
+        self.verified = verified
+        self.warning = warning
+    }
+}
+
 /// A request to the daemon.
 public struct Request: Codable, Sendable {
     public var id: Int
@@ -191,6 +219,8 @@ public struct Response: Codable, Sendable {
     public var error: String?
     public var event: String?
     public var volumes: [VolumeInfo]?
+    /// Disks ejected by FSMac that are waiting to be unplugged.
+    public var ejected: [EjectedDisk]?
     public var settings: Settings?
     public var version: String?
     public var output: String?
@@ -215,7 +245,8 @@ public enum Command {
     public static let subscribe = "subscribe"    // volume and log events
     public static let mount = "mount"            // disk, readOnly?, removeHibernation?
     public static let unmount = "unmount"        // disk, force?, eject?
-    public static let eject = "eject"            // disk (whole or partition)
+    public static let eject = "eject"            // disk (whole or partition), force? (streams steps)
+    public static let mountDisk = "mountDisk"    // disk (whole): mount an ejected disk again
     public static let check = "check"            // disk, repair? (streams output)
     public static let format = "format"          // disk, fsType, label
     public static let getSettings = "getSettings"

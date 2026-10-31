@@ -171,6 +171,9 @@ final class WorkerProcess {
         }
         var status: Int32 = 0
         waitpid(pid, &status, 0)
+        // Set before `exited`, so that anyone who sees the exit also sees
+        // the status.
+        exitStatus = (status & 0x7f) == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f)
         exited = true
         if controlFD >= 0 {
             close(controlFD)
@@ -179,7 +182,6 @@ final class WorkerProcess {
         lock.unlock()
         // Deliver any final status lines before reporting the exit.
         if !statusSource.isCancelled { readStatus() }
-        exitStatus = (status & 0x7f) == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f)
         exitSource.cancel()
         if !statusSource.isCancelled { statusSource.cancel() }
         exitSignal.signal()

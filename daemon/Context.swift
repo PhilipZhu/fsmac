@@ -8,8 +8,8 @@ import SystemConfiguration
 final class Context {
     /// System mode: running as root under launchd (normal operation).
     /// User mode: unprivileged development/testing daemon that only handles
-    /// disks the user can open (attached disk images) and mounts them
-    /// below ~/FSMacVolumes.
+    /// disks the user can open (attached disk images) and mounts them in
+    /// FSMacVolumes in the user's temporary folder ($TMPDIR).
     let userMode: Bool
     let helpersDir: URL
     let socketPath: String
@@ -25,7 +25,8 @@ final class Context {
             let home = URL(fileURLWithPath: NSHomeDirectory())
             supportDir = home.appendingPathComponent("Library/Application Support/FSMac")
             logDir = home.appendingPathComponent("Library/Logs/FSMac")
-            mountRoot = home.appendingPathComponent("FSMacVolumes")
+            // Kept out of the home folder.
+            mountRoot = FileManager.default.temporaryDirectory.appendingPathComponent("FSMacVolumes")
             socketPath = FSMac.userSocketPath
         } else {
             supportDir = URL(fileURLWithPath: FSMac.supportDirectory)

@@ -19,7 +19,7 @@ struct MenuView: View {
             if model.helperOutdated {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(.tint)
-                    Text("The helper is from another version of FSMac.")
+                    Text("The helper is out of date.")
                         .font(.caption)
                     Spacer()
                     Button("Update") { model.updateHelper() }
@@ -61,7 +61,10 @@ struct MenuView: View {
         case .unavailable: return "Helper not running"
         case .connected:
             let n = model.volumes.filter { $0.state == .mounted }.count
-            if model.volumes.isEmpty { return "NTFS and ext4 read & write" }
+            let e = model.ejected.filter(\.verified).count
+            if n == 0 && e > 0 { return e == 1 ? "1 disk ready to unplug" : "\(e) disks ready to unplug" }
+            if n == 0 && !model.ejected.isEmpty { return "Ejected, not verified" }
+            if groups.isEmpty && model.ejected.isEmpty { return "NTFS and ext4 read & write" }
             return n == 0 ? "No volumes mounted" : "\(n) volume\(n == 1 ? "" : "s") mounted"
         }
     }
@@ -79,17 +82,13 @@ struct MenuView: View {
         case .unavailable:
             SetupView()
         case .connected:
-            if model.volumes.isEmpty {
+            if groups.isEmpty && model.ejected.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "externaldrive.badge.questionmark")
                         .font(.system(size: 30))
                         .foregroundStyle(.secondary)
                     Text("No NTFS or ext disks connected")
                         .font(.callout)
-                    Text("Connect a disk and it will appear in Finder, ready to use.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 22)
@@ -97,12 +96,15 @@ struct MenuView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
+                        ForEach(model.ejected) { disk in
+                            EjectedDiskCard(disk: disk)
+                        }
                         ForEach(groups, id: \.disk) { group in
-                            Text(group.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 14)
-                                .padding(.top, 8)
+                            DiskHeader(disk: group.disk, title: group.title, size: group.size,
+                                       canEject: group.volumes.contains { $0.needsPermission != true })
+                            if let err = model.ejectErrors[group.disk] {
+                                EjectErrorBox(disk: group.disk, message: err)
+                            }
                             ForEach(group.volumes) { v in
                                 VolumeRow(volume: v)
                             }
@@ -119,20 +121,23 @@ struct MenuView: View {
     private struct Group {
         var disk: String
         var title: String
+        var size: UInt64?
         var volumes: [VolumeInfo]
     }
 
+    /// Volumes by disk; ejected disks are shown as their own card instead.
     private var groups: [Group] {
+        let ejected = Set(model.ejected.map(\.id))
         var order: [String] = []
         var map: [String: [VolumeInfo]] = [:]
-        for v in model.volumes {
+        for v in model.volumes where !ejected.contains(v.wholeDisk) {
             if map[v.wholeDisk] == nil { order.append(v.wholeDisk) }
             map[v.wholeDisk, default: []].append(v)
         }
         return order.map { disk in
             let vs = map[disk]!
             let name = vs.first?.deviceName.isEmpty == false ? vs.first!.deviceName : disk
-            return Group(disk: disk, title: name.uppercased(), volumes: vs)
+            return Group(disk: disk, title: name, size: nil, volumes: vs)
         }
     }
 
@@ -186,7 +191,7 @@ struct SetupView: View {
             case .requiresApproval:
                 Label("Allow the FSMac helper", systemImage: "hand.raised.fill")
                     .font(.headline)
-                Text("Turn on **FSMac** under *Allow in the Background* in System Settings › General › Login Items & Extensions. The helper mounts NTFS and ext disks for all users.")
+                Text("Turn on FSMac in Login Items & Extensions › Allow in the Background.")
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Open Login Items Settings") {
@@ -196,14 +201,14 @@ struct SetupView: View {
             case .enabled, .installedManually:
                 Label("Starting the helper…", systemImage: "hourglass")
                     .font(.headline)
-                Text("The FSMac helper is installed but not responding yet. If this persists, reinstall it in Settings.")
+                Text("Not responding yet.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             case .notInstalled, .unavailable:
-                Label("One more step", systemImage: "wrench.and.screwdriver.fill")
+                Label("Install the helper", systemImage: "wrench.and.screwdriver.fill")
                     .font(.headline)
-                Text("FSMac needs a small helper to read and write NTFS and ext4 disks. macOS will ask you to allow it in System Settings.")
+                Text("Needed to read and write NTFS and ext disks.")
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
@@ -230,21 +235,13 @@ struct DiskAccessBanner: View {
             Label("Allow FSMac to read disks", systemImage: "lock.shield.fill")
                 .font(.headline)
                 .foregroundStyle(.orange)
-            Text("macOS blocks access to connected disks until the FSMac helper has Full Disk Access.")
+            Text("Drag **fsmacd** into Privacy & Security › Full Disk Access.")
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("1. Click **Open Settings**. Full Disk Access and a Finder window showing **fsmacd** open.")
-                Text("2. Drag **fsmacd** into the Full Disk Access list and make sure it is turned on.")
-                Text("The disk is mounted a few seconds later.")
-                    .foregroundStyle(.secondary)
-            }
-            .font(.caption)
-            .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Open Settings") { model.openDiskAccessSettings() }
                     .buttonStyle(.borderedProminent)
-                Button("Show fsmacd in Finder") { model.revealHelper() }
+                Button("Show fsmacd") { model.revealHelper() }
             }
             .controlSize(.small)
         }
