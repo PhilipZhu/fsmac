@@ -7,17 +7,37 @@ import SwiftUI
 struct FSMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = AppModel()
+    @Environment(\.openWindow) private var openWindow
+    @State private var checkedSetup = false
 
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra(isInserted: .constant(
+            model.connection == .connected && (!model.volumes.isEmpty || !model.ejected.isEmpty)
+        )) {
             MenuView()
                 .environmentObject(model)
         } label: {
             Image(systemName: menuBarSymbol)
-                .modifier(LaunchCoordinator())
-                .environmentObject(model)
         }
         .menuBarExtraStyle(.window)
+        .onChange(of: model.connection, initial: true) {
+            guard !checkedSetup else { return }
+            checkedSetup = true
+            if ProcessInfo.processInfo.environment["FSMAC_SNAPSHOTS"] != nil { return }
+            Task { @MainActor in
+                // Give the connection a moment to come up, even with no menu bar icon.
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard model.connection != .connected else { return }
+                model.refreshHelperStatus()
+                switch model.helper {
+                case .enabled, .installedManually:
+                    break
+                case .notInstalled, .requiresApproval, .unavailable:
+                    openWindow(id: "welcome")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
+        }
 
         Window("Welcome to FSMac", id: "welcome") {
             WelcomeView()

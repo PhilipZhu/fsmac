@@ -4,7 +4,8 @@
 
 Connect a Windows or Linux disk and it appears in Finder, ready to use: copy,
 edit, rename and delete files the same way as on any Mac disk. FSMac lives in
-the menu bar, mounts supported disks automatically and ejects them safely.
+the menu bar while a supported disk is connected, mounts disks automatically
+and ejects them safely.
 
 - **NTFS read & write.** Uses ntfs-3g, the most widely used NTFS
   implementation outside Windows. File names with characters Windows forbids
@@ -45,8 +46,8 @@ troubleshooting, architecture) is [docs/FSMac Manual.html](docs/FSMac%20Manual.h
 ## Install
 
 1. Open `FSMac-<version>.dmg` and drag **FSMac** to **Applications**.
-2. Open FSMac. A drive icon appears in the menu bar.
-3. Click it, then **Install Helper**. macOS asks you to allow FSMac in
+2. Open FSMac. The welcome window opens if setup is needed.
+3. Click **Install Helper**. macOS asks you to allow FSMac in
    **System Settings › General › Login Items & Extensions** (under *Allow in
    the Background*). Turn it on.
 

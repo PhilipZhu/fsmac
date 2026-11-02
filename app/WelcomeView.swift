@@ -108,34 +108,3 @@ private struct Step<Accessory: View>: View {
         }
     }
 }
-
-/// Opens setup when installation or approval is needed, not while an
-/// installed helper is starting or restarting.
-struct LaunchCoordinator: ViewModifier {
-    @EnvironmentObject var model: AppModel
-    @Environment(\.openWindow) private var openWindow
-    @State private var checked = false
-
-    func body(content: Content) -> some View {
-        content.task {
-            guard !checked else { return }
-            checked = true
-            if ProcessInfo.processInfo.environment["FSMAC_SNAPSHOTS"] != nil { return }
-            // Give the connection a moment to come up.
-            do {
-                try await Task.sleep(nanoseconds: 1_500_000_000)
-            } catch {
-                return
-            }
-            guard model.connection != .connected else { return }
-            model.refreshHelperStatus()
-            switch model.helper {
-            case .enabled, .installedManually:
-                break
-            case .notInstalled, .requiresApproval, .unavailable:
-                openWindow(id: "welcome")
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        }
-    }
-}
