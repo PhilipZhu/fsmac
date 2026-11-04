@@ -80,6 +80,7 @@ FSMac at login**.
 | Use an ejected disk again without unplugging it | **Mount Again** on its card in the menu, or `fsmac mount disk4` |
 | Mount read-only | Menu › **⋯** › **Mount Read-Only** (or **Remount Read-Only**) |
 | Never mount a disk automatically | **⋯** › **When Connected** › **Don't Mount Automatically** or **Ignore This Volume** |
+| Keep a drive from going to sleep | **⋯** › **Keep Drive Awake**, or `fsmac keep-awake <volume> on` |
 | Check or repair | **⋯** › **Check Disk…** |
 | Erase as NTFS or ext4 | **⋯** › **Erase…** (a volume, or the entire disk) |
 
@@ -92,6 +93,8 @@ fsmac mount <volume> [--read-only]
 fsmac unmount <volume> [--force]
 fsmac eject <volume|disk> [--force]  shows each step and says whether it is safe to unplug
 fsmac mount <disk>               mount an ejected disk that is still connected
+fsmac reconnect [name]           re-plug a drive that stopped responding
+fsmac keep-awake <volume|disk> [on|off]
 fsmac check <volume> [--repair]
 fsmac format <disk> --type ntfs|ext4 --label NAME
 fsmac policy <volume> read-write|read-only|ignore|default [--no-auto-mount]
@@ -120,6 +123,13 @@ fsmac log [-f]                   the helper's log
   quotas, shared blocks or an external journal, and ext volumes with errors
   that `e2fsck` could not fix automatically. NTFS files encrypted with EFS
   cannot be read.
+- **Drives that don't wake up.** macOS puts idle disks to sleep. Some drives
+  (seen with a SAS drive in a USB-to-SAS adapter) never answer again when
+  macOS wakes them, and macOS drops them although they are still plugged
+  in. Linux doesn't put disks to sleep, so they work there. FSMac shows such
+  a drive as **Not responding**. Switch it off and on, and from then on FSMac
+  keeps it awake with a small read every 10 seconds. The Mac's own sleep
+  still powers disks down, so eject such a drive before the Mac sleeps.
 - **Crash safety.** NTFS uses ntfs-3g's metadata ordering. On ext4, data is
   written in place and flushed every few seconds. If a disk is unplugged
   without ejecting, the next mount runs `e2fsck` automatically. Always eject

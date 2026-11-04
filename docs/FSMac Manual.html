@@ -242,13 +242,13 @@ footer.end { border-top: 1px solid var(--line); padding-top: 18px; color: var(--
 
 <header class="masthead">
   <div class="masthead-inner">
-    <div class="eyebrow">FSMac 1.0.3 · user and technical manual</div>
+    <div class="eyebrow">FSMac 1.0.5 · user and technical manual</div>
     <h1>FSMac Manual</h1>
     <p class="lede">FSMac lets a Mac read and write Windows (NTFS) and Linux (ext2, ext3, ext4) disks. Connect one and it appears in Finder, ready to use, and ejects like any other disk.</p>
     <ul class="facts" aria-label="Product facts">
       <li><span class="k">Formats</span><span class="v">NTFS · ext2 · ext3 · ext4</span></li>
       <li><span class="k">Requires</span><span class="v">macOS 14 or later, Apple silicon</span></li>
-      <li><span class="k">Download</span><span class="v">FSMac-1.0.3.dmg, 4.5 MB</span></li>
+      <li><span class="k">Download</span><span class="v">FSMac-1.0.5.dmg, 4.6 MB</span></li>
       <li><span class="k">License</span><span class="v">GNU GPL v2</span></li>
     </ul>
   </div>
@@ -368,6 +368,7 @@ footer.end { border-top: 1px solid var(--line); padding-top: 18px; color: var(--
       <dl class="defs">
         <dt>Mount / Unmount</dt><dd>Also <b>Mount Read-Only</b>, <b>Remount Read-Only</b> and <b>Remount Read &amp; Write</b>.</dd>
         <dt>When Connected</dt><dd>Remembers how this volume is handled, by its UUID: the default, <b>Mount Read &amp; Write</b>, <b>Mount Read-Only</b>, <b>Don't Mount Automatically</b>, or <b>Ignore This Volume</b>. Review these under <b>Settings › Volumes</b>.</dd>
+        <dt>Keep Drive Awake</dt><dd>Keeps macOS from putting the drive to sleep while it is connected. For drives that drop off when macOS wakes them (see <a href="#troubleshooting">Troubleshooting</a>). FSMac turns it on by itself for a drive that stopped responding.</dd>
         <dt>Check Disk… / Erase…</dt><dd>See <a href="#tools">Check, repair, erase</a>.</dd>
         <dt>Discard hibernation</dt><dd>Shown for NTFS volumes left hibernated by Windows. See <a href="#ntfs">NTFS details</a>.</dd>
         <dt>Force Unmount</dt><dd>Unmounts even with files open. Unsaved changes in apps using the volume are lost. Available to administrators and the user at the Mac.</dd>
@@ -428,6 +429,8 @@ disk4s3  ext4  linux-home      31 GB free of 512.11 GB mounted  /Volumes/linux-h
           <tr><td><code>fsmac mount &lt;disk&gt;</code></td><td>Mount an ejected disk that is still connected, e.g. <code>fsmac mount disk4</code>.</td></tr>
           <tr><td><code>fsmac check &lt;volume&gt; [--repair]</code></td><td>Check or repair, printing the tool's output.</td></tr>
           <tr><td><code>fsmac format &lt;disk&gt; --type ntfs|ext4 --label NAME</code></td><td>Erase a partition (<code>disk4s2</code>) or a whole disk (<code>disk4</code>). Asks you to type the device name unless <code>--yes</code> is given.</td></tr>
+          <tr><td><code>fsmac reconnect [&lt;name&gt;]</code></td><td>Re-plug a drive that stopped responding, in software.</td></tr>
+          <tr><td><code>fsmac keep-awake &lt;volume|disk&gt; [on|off]</code></td><td>Keep the drive from going to sleep, or show whether it is.</td></tr>
           <tr><td><code>fsmac policy &lt;volume&gt; read-write|read-only|ignore|default</code></td><td>Remember how to handle this volume. Add <code>--no-auto-mount</code> to mount it only on request.</td></tr>
           <tr><td><code>fsmac config [&lt;key&gt; &lt;value&gt;]</code></td><td>Show the settings, or change one. Keys are listed under <a href="#settings">Settings</a>.</td></tr>
           <tr><td><code>fsmac watch</code></td><td>Follow volume events as they happen.</td></tr>
@@ -500,7 +503,7 @@ fsmac config ntfsMode read-only</pre><button class="copy" type="button">Copy</bu
         <li><b>Apple silicon only.</b> This build is not universal.</li>
         <li><b>Not notarized.</b> On a Mac other than the one it was built on, the first launch needs Control-click › Open.</li>
       </ul>
-      <div class="note"><span class="label">Release status, 1.0.3</span>
+      <div class="note"><span class="label">Release status, 1.0.5</span>
         <p>Tested on macOS 27 with disk images: every NTFS and ext code path, the helper's lifecycle, and the app. With a real USB drive (NTFS and ext4 partitions), mounting read &amp; write, reading, and ejecting from FSMac, from Finder and with <code>diskutil eject</code> (including Mount Again) have been verified through the installed helper. Writing to a real drive, noticing that an ejected drive was unplugged, the <code>fsmac_ext.fs</code> component that keeps macOS from calling ext disks unreadable, and unplugging a drive without ejecting have not yet been verified on real hardware.</p>
       </div>
     </section>
@@ -541,6 +544,12 @@ fsmac config ntfsMode read-only</pre><button class="copy" type="button">Copy</bu
 
       <details class="faq"><summary>macOS says a Linux disk “was not readable”</summary><div>
         <p>This appears when the helper isn't installed, because macOS has no ext driver of its own; click <b>Ignore</b> and install the helper. The helper installs <code>/Library/Filesystems/fsmac_ext.fs</code> so that macOS recognizes ext volumes and leaves them to FSMac. If the message still appears right after installing, restart the Mac once.</p>
+      </div></details>
+
+      <details class="faq"><summary>A drive shows “Not responding” although it is plugged in</summary><div>
+        <p>The drive stopped answering and macOS dropped its disk, while its USB connection stayed up. The usual cause is sleep: macOS puts idle disks to sleep (<i>Put hard disks to sleep when possible</i>), and some drives don't wake up again. When macOS asks them to spin up they keep answering “not ready”, and after about a minute macOS gives up on them. This was seen with an enterprise SAS drive in a USB-to-SAS adapter. Linux doesn't put disks to sleep by default, so the same drive works there.</p>
+        <p>Switch the drive off and on, or unplug it and connect it again. <b>Reconnect</b> re-plugs it in software, which helps with some enclosures but not with a drive that won't spin up. FSMac then keeps that drive awake: it reads one block every 10 seconds, so macOS never puts it to sleep. The drive's own power saving, such as parking its heads, is not affected. To change this, use <b>⋯ › Keep Drive Awake</b> or <code>fsmac keep-awake</code>.</p>
+        <p>When the Mac itself sleeps, macOS powers disks down regardless, so such a drive may still drop off after the Mac wakes up. Eject it before closing the lid. Turning off <i>Put hard disks to sleep when possible</i> (<code>sudo pmset -a disksleep 0</code>) has the same effect as keeping drives awake, for every disk and without FSMac.</p>
       </div></details>
 
       <details class="faq"><summary>“Disk Not Ejected Properly”</summary><div>
@@ -695,7 +704,7 @@ hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount disk.img</pre><b
         <li><b>ntfs-3g</b> (2026.9.28), the NTFS implementation and <code>mkntfs</code>, <code>ntfsfix</code>, <code>ntfslabel</code>. GPL v2 or later.</li>
         <li><b>e2fsprogs</b> (1.47.4), with libext2fs, journal recovery, <code>mke2fs</code>, <code>e2fsck</code> and <code>tune2fs</code>. GPL v2, with LGPL, BSD and MIT-licensed libraries.</li>
       </ul>
-      <footer class="end">FSMac 1.0.3 · Manual for macOS 14 and later on Apple silicon.</footer>
+      <footer class="end">FSMac 1.0.5 · Manual for macOS 14 and later on Apple silicon.</footer>
     </section>
   </main>
 </div>

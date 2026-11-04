@@ -7,7 +7,7 @@
 import Foundation
 
 public enum FSMac {
-    public static let version = "1.0.3"
+    public static let version = "1.0.5"
     public static let daemonLabel = "com.fsmac.daemon"
     public static let appBundleID = "com.fsmac.FSMac"
     public static let systemSocketPath = "/var/run/fsmac.sock"
@@ -86,6 +86,9 @@ public struct Settings: Codable, Equatable, Sendable {
     public var ejectWhenUnmounted = true
     /// Per-volume overrides keyed by volume UUID.
     public var volumes: [String: VolumePolicy] = [:]
+    /// Drives kept from going to sleep, by drive identity (see
+    /// VolumeInfo.keepAwake). Drives that stop responding are added.
+    public var keepAwake: [String] = []
 
     public init() {}
 
@@ -103,6 +106,7 @@ public struct Settings: Codable, Equatable, Sendable {
         keepExtOwnership = try c.decodeIfPresent(Bool.self, forKey: .keepExtOwnership) ?? d.keepExtOwnership
         ejectWhenUnmounted = try c.decodeIfPresent(Bool.self, forKey: .ejectWhenUnmounted) ?? d.ejectWhenUnmounted
         volumes = try c.decodeIfPresent([String: VolumePolicy].self, forKey: .volumes) ?? [:]
+        keepAwake = try c.decodeIfPresent([String].self, forKey: .keepAwake) ?? []
     }
 
     /// Effective policy for a volume.
@@ -146,6 +150,9 @@ public struct VolumeInfo: Codable, Identifiable, Hashable, Sendable {
     public var policy: VolumePolicy
     /// macOS refused FSMac access to the disk (Full Disk Access).
     public var needsPermission: Bool? = nil
+    /// FSMac keeps the drive from going to sleep (some drives don't wake up
+    /// again). nil: not possible for this disk.
+    public var keepAwake: Bool? = nil
 
     public var displayName: String {
         label.isEmpty ? "Untitled" : label
@@ -190,6 +197,30 @@ public struct EjectedDisk: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// A drive that stopped responding although it is still plugged in: macOS
+/// dropped its disk, but the USB device is still attached.
+public struct LostDisk: Codable, Identifiable, Hashable, Sendable {
+    public var id: String               // the USB device (registry ID, hex)
+    public var name: String
+    public var volumes: [String]        // FSMac volumes that were on it
+    public var date: Date
+    /// A software reconnect did not help: the drive itself has to be
+    /// switched off and on (or unplugged).
+    public var resetFailed: Bool?
+    /// FSMac will keep the drive awake once it is back.
+    public var keepAwake: Bool?
+
+    public init(id: String, name: String, volumes: [String], date: Date, resetFailed: Bool? = nil,
+                keepAwake: Bool? = nil) {
+        self.id = id
+        self.name = name
+        self.volumes = volumes
+        self.date = date
+        self.resetFailed = resetFailed
+        self.keepAwake = keepAwake
+    }
+}
+
 /// A request to the daemon.
 public struct Request: Codable, Sendable {
     public var id: Int
@@ -205,6 +236,7 @@ public struct Request: Codable, Sendable {
     public var uuid: String?
     public var policy: VolumePolicy?
     public var removeHibernation: Bool?
+    public var enabled: Bool?
 
     public init(id: Int, cmd: String) {
         self.id = id
@@ -221,6 +253,8 @@ public struct Response: Codable, Sendable {
     public var volumes: [VolumeInfo]?
     /// Disks ejected by FSMac that are waiting to be unplugged.
     public var ejected: [EjectedDisk]?
+    /// Drives that stopped responding but are still plugged in.
+    public var lost: [LostDisk]?
     public var settings: Settings?
     public var version: String?
     public var output: String?
@@ -247,11 +281,13 @@ public enum Command {
     public static let unmount = "unmount"        // disk, force?, eject?
     public static let eject = "eject"            // disk (whole or partition), force? (streams steps)
     public static let mountDisk = "mountDisk"    // disk (whole): mount an ejected disk again
+    public static let reconnect = "reconnect"    // disk = LostDisk.id: re-plug it in software
     public static let check = "check"            // disk, repair? (streams output)
     public static let format = "format"          // disk, fsType, label
     public static let getSettings = "getSettings"
     public static let setSettings = "setSettings"
     public static let setPolicy = "setPolicy"    // uuid, policy
+    public static let setKeepAwake = "setKeepAwake"  // disk (volume or whole), enabled
     public static let rescan = "rescan"
     /// Unmounts everything and removes system components before the helper
     /// is unregistered.

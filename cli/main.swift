@@ -14,6 +14,8 @@ Volumes:
   unmount <volume> [--force] [--eject]
   eject <volume|disk> [--force]       unmount everything on the disk, verify, eject it
   mount <disk>                        mount an ejected disk that is still connected
+  reconnect [<name>]                  re-plug a drive that stopped responding
+  keep-awake <volume|disk> [on|off]   keep the drive from going to sleep
   check <volume> [--repair]           check (or repair) the filesystem
   format <disk> --type ntfs|ext4 [--label NAME] [--force] [--yes]
                                       erase a partition or a whole disk
@@ -239,15 +241,68 @@ case "list", "ls":
     let ejected = r.ejected ?? []
     let ejectedIDs = Set(ejected.map(\.id))
     let vols = (r.volumes ?? []).filter { !ejectedIDs.contains($0.wholeDisk) }
+    let lost = r.lost ?? []
     if json {
         printJSON(vols)
     } else {
-        if !vols.isEmpty || ejected.isEmpty { printList(vols) }
-        if !ejected.isEmpty {
+        if !vols.isEmpty || (ejected.isEmpty && lost.isEmpty) { printList(vols) }
+        if !ejected.isEmpty || !lost.isEmpty {
             if !vols.isEmpty { print("") }
             for e in ejected { printEjected(e) }
+            for l in lost {
+                let what = l.volumes.isEmpty ? "" : " (\(l.volumes.joined(separator: ", ")))"
+                print(l.resetFailed == true
+                      ? "✗ “\(l.name)”\(what): still not responding after a reset. Switch it off and on, or unplug it."
+                      : "✗ “\(l.name)”\(what): not responding, still plugged in. Switch it off and on, or try fsmac reconnect")
+                if l.keepAwake == true { print("  FSMac will keep it awake from now on.") }
+            }
         }
     }
+
+case "reconnect":
+    let c = connect()
+    let lost = call(c, .make(Command.list)).lost ?? []
+    let wanted = args.first
+    let matches = lost.filter { wanted == nil || $0.name == wanted || $0.id == wanted }
+    guard let l = matches.first else { fail(lost.isEmpty ? "no drive needs reconnecting" : "no such drive") }
+    if matches.count > 1 { fail("several drives are not responding; name one: " + lost.map(\.name).joined(separator: ", ")) }
+    call(c, .make(Command.reconnect) { $0.disk = l.id })
+    print("“\(l.name)” reconnected.")
+    // Its volumes appear once the drive answers again.
+    for _ in 0..<30 {
+        let vols = volumes(c).filter { $0.deviceName == l.name }
+        if !vols.isEmpty {
+            for v in vols { print("  “\(v.displayName)”: \(stateText(v))\(v.mountPoint.map { " at \($0)" } ?? "")") }
+            exit(0)
+        }
+        Thread.sleep(forTimeInterval: 1)
+    }
+    print("No answer yet. If it stays silent, switch the drive off and on, or unplug it.")
+
+case "keep-awake":
+    guard let target = args.first else { fail("usage: fsmac keep-awake <volume|disk> [on|off]", code: 2) }
+    let c = connect()
+    let v: VolumeInfo
+    if let whole = wholeDiskName(target) {
+        guard let first = volumes(c).first(where: { $0.wholeDisk == whole }) else { fail("\(whole) has no NTFS or ext volumes") }
+        v = first
+    } else {
+        v = resolve(c, target)
+    }
+    guard let current = v.keepAwake else { fail("“\(v.deviceName)” can't be kept awake") }
+    guard args.count >= 2 else {
+        print("“\(v.deviceName)” is \(current ? "" : "not ")kept awake.")
+        exit(0)
+    }
+    let on: Bool
+    switch args[1] {
+    case "on", "yes", "true", "1": on = true
+    case "off", "no", "false", "0": on = false
+    default: fail("usage: fsmac keep-awake <volume|disk> [on|off]", code: 2)
+    }
+    call(c, .make(Command.setKeepAwake) { $0.disk = v.id; $0.enabled = on })
+    print(on ? "“\(v.deviceName)” will be kept awake while it is connected."
+             : "“\(v.deviceName)” may go to sleep again.")
 
 case "mount":
     let ro = flag("--read-only", "-r")

@@ -61,6 +61,7 @@ struct MenuView: View {
         case .unavailable: return "Helper not running"
         case .connected:
             let n = model.volumes.filter { $0.state == .mounted }.count
+            if !model.lost.isEmpty { return model.lost.count == 1 ? "1 drive not responding" : "\(model.lost.count) drives not responding" }
             let e = model.ejected.filter(\.verified).count
             if n == 0 && e > 0 { return e == 1 ? "1 disk ready to unplug" : "\(e) disks ready to unplug" }
             if n == 0 && !model.ejected.isEmpty { return "Ejected, not verified" }
@@ -82,7 +83,7 @@ struct MenuView: View {
         case .unavailable:
             SetupView()
         case .connected:
-            if groups.isEmpty && model.ejected.isEmpty {
+            if groups.isEmpty && model.ejected.isEmpty && model.lost.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "externaldrive.badge.questionmark")
                         .font(.system(size: 30))
@@ -96,6 +97,9 @@ struct MenuView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
+                        ForEach(model.lost) { disk in
+                            LostDiskCard(disk: disk)
+                        }
                         ForEach(model.ejected) { disk in
                             EjectedDiskCard(disk: disk)
                         }

@@ -167,3 +167,57 @@ struct EjectedDiskCard: View {
             ? " · available to mount again" : " · reconnect to use again")
     }
 }
+
+/// A drive macOS lost contact with although it is still plugged in.
+struct LostDiskCard: View {
+    @EnvironmentObject var model: AppModel
+    var disk: LostDisk
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "externaldrive.badge.xmark")
+                .font(.system(size: 22))
+                .foregroundStyle(.red)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(disk.name)
+                    .font(.system(.body, weight: .medium))
+                    .lineLimit(1)
+                Text(disk.resetFailed == true ? "Still not responding" : "Not responding")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.red)
+                Text("Switch the drive off and on, or unplug it and connect it again." +
+                     (disk.keepAwake == true ? " FSMac will keep it awake from now on." : ""))
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(details)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button {
+                        model.reconnect(disk)
+                    } label: {
+                        Label(disk.resetFailed == true ? "Try Again" : "Reconnect", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(model.pending.contains(disk.id))
+                    if model.pending.contains(disk.id) { ProgressView().controlSize(.small) }
+                }
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.red.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.red.opacity(0.35)))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+    }
+
+    private var details: String {
+        let when = DateFormatter.localizedString(from: disk.date, dateStyle: .none, timeStyle: .short)
+        let what = disk.volumes.isEmpty ? "" : disk.volumes.joined(separator: ", ") + " · "
+        return "\(what)\(when) · still plugged in"
+    }
+}

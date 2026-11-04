@@ -18,6 +18,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var volumes: [VolumeInfo] = []
     /// Disks FSMac ejected that have not been unplugged yet.
     @Published private(set) var ejected: [EjectedDisk] = []
+    /// Drives that stopped responding but are still plugged in.
+    @Published private(set) var lost: [LostDisk] = []
     /// Whole disk → the step an eject in progress is at.
     @Published private(set) var ejectProgress: [String: String] = [:]
     /// Whole disk → why the last eject failed (the disk is still in use).
@@ -73,6 +75,7 @@ final class AppModel: ObservableObject {
                     self.connection = .connected
                     self.volumes = r.volumes ?? []
                     self.ejected = r.ejected ?? []
+                    self.lost = r.lost ?? []
                     self.announcedMounts = Set(self.volumes.filter { $0.state == .mounted }.map(\.id))
                     if let s = r.settings { self.settings = s }
                     self.retryTimer?.invalidate()
@@ -116,6 +119,7 @@ final class AppModel: ObservableObject {
             announcedMounts = Set(vols.filter { $0.state == .mounted }.map(\.id))
             volumes = vols
             ejected = ev.ejected ?? []
+            lost = ev.lost ?? []
             // Forget errors about disks that are gone.
             let present = Set(vols.map(\.wholeDisk))
             ejectErrors = ejectErrors.filter { present.contains($0.key) }
@@ -194,6 +198,11 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Re-plugs a drive that stopped responding, in software.
+    func reconnect(_ disk: LostDisk) {
+        request(.make(Command.reconnect) { $0.disk = disk.id }, disk: disk.id)
+    }
+
     /// Mounts an ejected disk that is still connected.
     func mountDisk(_ whole: String) {
         ejectErrors[whole] = nil
@@ -224,6 +233,13 @@ final class AppModel: ObservableObject {
         }, disk: diskID, output: output) { r in
             done(r.ok, r.ok ? "The disk was formatted." : (r.error ?? "Formatting failed."))
         }
+    }
+
+    func setKeepAwake(_ v: VolumeInfo, _ on: Bool) {
+        request(.make(Command.setKeepAwake) {
+            $0.disk = v.id
+            $0.enabled = on
+        })
     }
 
     func setPolicy(_ v: VolumeInfo, _ policy: VolumePolicy?) {

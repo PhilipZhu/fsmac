@@ -31,6 +31,10 @@ final class Volume {
     var pendingMountPoint: String?
     /// Abandon the mount in progress.
     var cancelMount = false
+    /// The USB/Thunderbolt device the disk is on.
+    var deviceID: UInt64?
+    /// PhysicalDevice.identity of that device.
+    var driveIdentity: String?
     /// The current worker reported that it wrote everything and marked the
     /// filesystem clean.
     var stoppedClean = false
@@ -111,6 +115,17 @@ final class VolumeManager {
     }
     private var ejected: [String: EjectRecord] = [:]
     private var presenceTimer: DispatchSourceTimer?
+    /// Drives that stopped responding but are still plugged in, by USB device.
+    private var lost: [UInt64: LostDisk] = [:]
+    /// Disks whose volumes just disappeared, looked at once things settle:
+    /// unplugged, or dropped by macOS while still plugged in?
+    private var dropped: [String: (name: String, volumes: Set<String>, deviceID: UInt64?, inUse: Bool)] = [:]
+    /// Reads keeping drives awake; one at a time, as a drive that stopped
+    /// answering may hold a read for a minute.
+    private let keepAwakeQueue = DispatchQueue(label: "com.fsmac.keepawake")
+    private var keepAwakeTimer: DispatchSourceTimer?
+    private var touching: Set<String> = []
+    private var touchFailed: Set<String> = []
     private(set) var shuttingDown = false
 
     /// Volume list changed (called on q).
@@ -131,6 +146,7 @@ final class VolumeManager {
         q.sync {
             cleanupStaleMounts()
             loadEjected()
+            if !ctx.userMode { scanForStalledDrives() }
             watcher = DiskWatcher(queue: q)
             watcher.onAppeared = { [weak self] d in self?.diskAppeared(d) }
             watcher.onDisappeared = { [weak self] d in self?.diskDisappeared(d) }
@@ -204,6 +220,7 @@ final class VolumeManager {
             Log.info("\(whole) is in use again; no longer listed as ejected")
         }
         saveEjected()
+        updateKeepAwake()
         onChange()
     }
 
@@ -409,6 +426,12 @@ final class VolumeManager {
             mountPoint: d.volumePath, readOnly: d.volumePath != nil, notice: nil,
             error: nil, totalBytes: d.size, freeBytes: nil, policy: policy)
         let v = Volume(info: info)
+        v.deviceID = PhysicalDevice.id(forBSDName: d.wholeBSDName)
+        v.driveIdentity = v.deviceID.flatMap(PhysicalDevice.identity)
+        v.info.keepAwake = v.driveIdentity.map { settings.keepAwake.contains($0) }
+        if let id = v.deviceID, lost.removeValue(forKey: id) != nil {
+            Log.info("\(d.wholeBSDName) is responding again")
+        }
         // macOS may re-announce a disk's partitions while it is being
         // ejected: they must not be mounted again behind the user's back.
         if quiesced(d.wholeBSDName) || userUnmounted { v.userUnmounted = true }
@@ -492,10 +515,202 @@ final class VolumeManager {
         } else {
             Log.info("\(bsd) '\(v.info.displayName)' removed")
         }
-        if wasWritable {
-            onMessage("Disk Not Ejected Properly", "“\(v.info.displayName)” was unplugged while mounted.")
+        // Not part of an eject, a format or a check: work out (once per
+        // disk, when things have settled) whether it was unplugged or
+        // dropped by macOS while still plugged in.
+        let whole = v.info.wholeDisk
+        if !quiesced(whole) && !v.busy {
+            var entry = dropped[whole] ?? (name: v.info.deviceName.isEmpty ? whole : v.info.deviceName,
+                                           volumes: [], deviceID: v.deviceID, inUse: false)
+            entry.volumes.insert(v.info.displayName)
+            entry.inUse = entry.inUse || wasWritable || worker != nil
+            if dropped[whole] == nil {
+                q.asyncAfter(deadline: .now() + 2) { [weak self] in self?.resolveDropped(whole) }
+            }
+            dropped[whole] = entry
         }
         changed()
+    }
+
+    private func resolveDropped(_ whole: String) {
+        guard let d = dropped.removeValue(forKey: whole) else { return }
+        // Back already (macOS re-read the partition map)? Then nothing happened.
+        if let id = d.deviceID, volumes.values.contains(where: { $0.deviceID == id }) { return }
+        if probing.contains(where: { $0 == whole || $0.hasPrefix(whole + "s") }) { return }
+        if let id = d.deviceID, PhysicalDevice.isPresent(id) {
+            let keep = learnKeepAwake(PhysicalDevice.identity(id), name: d.name)
+            lost[id] = LostDisk(id: String(id, radix: 16), name: d.name, volumes: d.volumes.sorted(), date: Date(),
+                                keepAwake: keep ? true : nil)
+            Log.warn("\(whole) '\(d.name)' stopped responding but is still plugged in")
+            if d.inUse {
+                onMessage("“\(d.name)” Stopped Responding",
+                          "It is still plugged in. Switch it off and on to use it again." +
+                          (keep ? " FSMac will keep it awake from now on." : ""))
+            }
+            ensurePresenceTimer()
+            changed()
+        } else if d.inUse {
+            onMessage("Disk Not Ejected Properly", "“\(d.name)” was unplugged while mounted.")
+        }
+    }
+
+    // MARK: - Drives that stopped responding
+
+    func lostDisks() -> [LostDisk] {
+        lost.values.sorted { $0.date > $1.date }
+    }
+
+    /// Finds USB drives that were already unresponsive when the helper
+    /// started (seen twice, a few seconds apart, to skip drives that are
+    /// just being attached).
+    private func scanForStalledDrives(after delay: TimeInterval = 5, named: String? = nil,
+                                      volumes knownVolumes: [String] = [], resetFailed: Bool = false) {
+        work.asyncAfter(deadline: .now() + delay) { [weak self] in
+            let first = PhysicalDevice.stalledStorageDevices()
+            guard !first.isEmpty else { return }
+            Thread.sleep(forTimeInterval: 4)
+            let stalled = first.intersection(PhysicalDevice.stalledStorageDevices())
+            let names = Dictionary(uniqueKeysWithValues: stalled.map { ($0, PhysicalDevice.name($0) ?? "USB disk") })
+            let identities = Dictionary(uniqueKeysWithValues: stalled.map { ($0, PhysicalDevice.identity($0)) })
+            self?.q.async {
+                guard let self else { return }
+                for id in stalled where self.lost[id] == nil && !self.volumes.values.contains(where: { $0.deviceID == id }) {
+                    let name = names[id] ?? "USB disk"
+                    if let named, name != named { continue }
+                    let keep = self.learnKeepAwake(identities[id] ?? nil, name: name)
+                    self.lost[id] = LostDisk(id: String(id, radix: 16), name: name, volumes: knownVolumes,
+                                             date: Date(), resetFailed: resetFailed ? true : nil,
+                                             keepAwake: keep ? true : nil)
+                    Log.warn("'\(name)' is plugged in but not responding\(resetFailed ? " after a reset" : "")")
+                }
+                if !stalled.isEmpty {
+                    self.ensurePresenceTimer()
+                    self.changed()
+                }
+            }
+        }
+    }
+
+    /// Re-plugs a drive that stopped responding, in software.
+    func reconnect(_ idString: String, completion: @escaping (String?) -> Void) {
+        guard let id = UInt64(idString, radix: 16), let disk = lost[id] else {
+            return completion("no such unresponsive disk: \(idString)")
+        }
+        work.async { [weak self] in
+            let err = PhysicalDevice.reconnect(id)
+            self?.q.async {
+                guard let self else { return }
+                if err == nil {
+                    self.lost.removeValue(forKey: id)
+                    Log.info("reconnected '\(disk.name)'")
+                    self.changed()
+                    // macOS tries the drive for up to half a minute; if it is
+                    // still silent then, only switching it off and on helps.
+                    self.scanForStalledDrives(after: 35, named: disk.name, volumes: disk.volumes, resetFailed: true)
+                } else {
+                    Log.warn("reconnecting '\(disk.name)' failed: \(err!)")
+                }
+                completion(err)
+            }
+        }
+    }
+
+    // MARK: - Keeping drives awake
+
+    // macOS puts idle disks to sleep ("Put hard disks to sleep when
+    // possible"). Some drives don't wake up again: macOS asks them to spin
+    // up, they keep answering "not ready", and after about a minute macOS
+    // gives up and drops the disk although it is still plugged in (seen with
+    // SAS drives behind USB adapters). Linux doesn't put disks to sleep by
+    // default, so the same drive works there. A small read every few
+    // seconds counts as activity and keeps macOS from putting the drive to
+    // sleep; the drive's own power saving is not affected.
+    //
+    // macOS lowers a disk's power state one step each time its idle timer
+    // runs out (20 s with the default 10-minute disk sleep, so a drive is
+    // spun down after about a minute); the drive is read four times per
+    // period.
+
+    /// Seconds between reads, per whole disk, and when it was last read.
+    private var touchInterval: [String: TimeInterval] = [:]
+    private var lastTouch: [String: Date] = [:]
+
+    /// Remembers a drive that stopped responding, so that it is kept awake
+    /// from now on. True if it will be.
+    private func learnKeepAwake(_ identity: String?, name: String) -> Bool {
+        guard let identity else { return false }
+        if !settings.keepAwake.contains(identity) {
+            var s = settings
+            s.keepAwake.append(identity)
+            config.update(s)
+            Log.info("'\(name)' will be kept awake from now on")
+        }
+        return true
+    }
+
+    /// Turns keeping a drive awake on or off; `disk` is one of its volumes
+    /// or the whole disk.
+    func setKeepAwake(_ disk: String, enabled: Bool) -> String? {
+        guard let v = volumes[disk] ?? volumes.values.first(where: { $0.info.wholeDisk == disk }) else {
+            return "no such volume: \(disk)"
+        }
+        guard let identity = v.driveIdentity else { return "\(v.info.deviceName) can't be kept awake" }
+        var s = settings
+        s.keepAwake.removeAll { $0 == identity }
+        if enabled { s.keepAwake.append(identity) }
+        config.update(s)
+        Log.info("\(enabled ? "keeping" : "no longer keeping") '\(v.info.deviceName)' awake")
+        applySettings()
+        return nil
+    }
+
+    /// Whole disks to keep awake: drives on the list that are attached and
+    /// not being ejected.
+    private func keepAwakeDisks() -> Set<String> {
+        Set(volumes.values.filter { v in
+            v.info.keepAwake == true && !v.gone && !ejecting.contains(v.info.wholeDisk) &&
+                externalEjects[v.info.wholeDisk] == nil
+        }.map { $0.info.wholeDisk })
+    }
+
+    private func updateKeepAwake() {
+        let disks = keepAwakeDisks()
+        lastTouch = lastTouch.filter { disks.contains($0.key) }
+        touchInterval = touchInterval.filter { disks.contains($0.key) }
+        let any = !disks.isEmpty
+        if any, keepAwakeTimer == nil {
+            let t = DispatchSource.makeTimerSource(queue: q)
+            t.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(200))
+            t.setEventHandler { [weak self] in self?.touchKeepAwakeDisks() }
+            t.resume()
+            keepAwakeTimer = t
+        } else if !any, let t = keepAwakeTimer {
+            t.cancel()
+            keepAwakeTimer = nil
+        }
+    }
+
+    private func touchKeepAwakeDisks() {
+        let now = Date()
+        for whole in keepAwakeDisks() where !touching.contains(whole) {
+            if let last = lastTouch[whole], now.timeIntervalSince(last) < touchInterval[whole] ?? 5 { continue }
+            touching.insert(whole)
+            keepAwakeQueue.async { [weak self] in
+                let ok = touchDisk(whole)
+                let period = PhysicalDevice.idleTimerPeriod(forBSDName: whole)
+                self?.q.async {
+                    guard let self else { return }
+                    self.touching.remove(whole)
+                    self.lastTouch[whole] = Date()
+                    self.touchInterval[whole] = min(10, max(1, (period ?? 20) / 4))
+                    if ok {
+                        self.touchFailed.remove(whole)
+                    } else if self.touchFailed.insert(whole).inserted {
+                        Log.warn("\(whole): could not read the disk to keep it awake")
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Policy
@@ -1246,7 +1461,7 @@ final class VolumeManager {
     }
 
     private func ensurePresenceTimer() {
-        guard presenceTimer == nil, !ejected.isEmpty else { return }
+        guard presenceTimer == nil, !ejected.isEmpty || !lost.isEmpty else { return }
         let t = DispatchSource.makeTimerSource(queue: q)
         t.schedule(deadline: .now() + 1, repeating: 1.5)
         t.setEventHandler { [weak self] in self?.checkEjectedPresence() }
@@ -1270,7 +1485,14 @@ final class VolumeManager {
                 any = true
             }
         }
-        if ejected.isEmpty {
+        // A drive that stopped responding is gone once it is unplugged (or
+        // was reset and attached again under a new identity).
+        for (id, disk) in lost where !PhysicalDevice.isPresent(id) {
+            lost.removeValue(forKey: id)
+            Log.info("'\(disk.name)' was disconnected")
+            any = true
+        }
+        if ejected.isEmpty && lost.isEmpty {
             presenceTimer?.cancel()
             presenceTimer = nil
         }
@@ -1714,12 +1936,17 @@ final class VolumeManager {
     }
 
     func setSettings(_ s: Settings) {
+        // The list of drives to keep awake changes behind the clients' backs
+        // (drives are added when they stop responding); keep it.
+        var s = s
+        s.keepAwake = settings.keepAwake
         config.update(s)
         applySettings()
     }
 
     private func applySettings() {
         for v in volumes.values {
+            v.info.keepAwake = v.driveIdentity.map { settings.keepAwake.contains($0) }
             let p = settings.policy(fsType: v.info.fsType, uuid: v.info.uuid)
             let old = v.info.policy
             v.info.policy = p

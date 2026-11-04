@@ -155,6 +155,7 @@ final class IPCServer {
         ev.event = Event.volumes
         ev.volumes = manager.snapshot()
         ev.ejected = manager.ejectedDisks()
+        ev.lost = manager.lostDisks()
         broadcast(ev)
     }
 
@@ -219,6 +220,7 @@ final class IPCServer {
             reply(nil) {
                 $0.volumes = manager.snapshot()
                 $0.ejected = manager.ejectedDisks()
+                $0.lost = manager.lostDisks()
             }
             manager.refreshSpace()   // subscribers get the new figures
         case Command.subscribe:
@@ -226,6 +228,7 @@ final class IPCServer {
             reply(nil) {
                 $0.volumes = manager.snapshot()
                 $0.ejected = manager.ejectedDisks()
+                $0.lost = manager.lostDisks()
                 $0.settings = manager.settings
             }
         case Command.mount:
@@ -254,6 +257,10 @@ final class IPCServer {
                 // whether every volume confirmed its data was written.
                 reply(err) { $0.ejected = self.manager.ejectedDisks().filter { $0.id == whole } }
             }
+        case Command.reconnect:
+            guard let disk = req.disk else { return reply("missing disk") }
+            guard needPrivileged("Reconnecting a disk") else { return }
+            manager.reconnect(disk) { reply($0) }
         case Command.mountDisk:
             guard let disk = req.disk else { return reply("missing disk") }
             manager.mountDisk(disk, readOnly: req.readOnly ?? false) { reply($0) }
@@ -280,6 +287,10 @@ final class IPCServer {
             guard let uuid = req.uuid else { return reply("missing uuid") }
             manager.setPolicy(uuid: uuid, policy: req.policy)
             reply(nil) { $0.settings = manager.settings }
+        case Command.setKeepAwake:
+            guard let disk = req.disk, let enabled = req.enabled else { return reply("missing disk or enabled") }
+            guard needPrivileged("Changing whether a drive is kept awake") else { return }
+            reply(manager.setKeepAwake(disk, enabled: enabled))
         case Command.rescan:
             manager.rescan()
             reply(nil)

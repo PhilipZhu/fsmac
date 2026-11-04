@@ -12,7 +12,7 @@ struct FSMacApp: App {
 
     var body: some Scene {
         MenuBarExtra(isInserted: .constant(
-            model.connection == .connected && (!model.volumes.isEmpty || !model.ejected.isEmpty)
+            model.connection == .connected && (!model.volumes.isEmpty || !model.ejected.isEmpty || !model.lost.isEmpty)
         )) {
             MenuView()
                 .environmentObject(model)
@@ -72,7 +72,9 @@ struct FSMacApp: App {
 
     private var menuBarSymbol: String {
         if model.connection == .unavailable { return "externaldrive.badge.exclamationmark" }
-        if model.volumes.contains(where: { $0.state == .error }) { return "externaldrive.badge.exclamationmark" }
+        if model.volumes.contains(where: { $0.state == .error }) || !model.lost.isEmpty {
+            return "externaldrive.badge.exclamationmark"
+        }
         if model.volumes.contains(where: { $0.state == .mounted }) { return "externaldrive.fill" }
         if !model.ejected.isEmpty {
             return model.ejected.allSatisfy(\.verified) ? "externaldrive.badge.checkmark" : "externaldrive.badge.exclamationmark"

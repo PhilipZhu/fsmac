@@ -135,6 +135,18 @@ struct VolumeRow: View {
             policyButton(VolumePolicy(mode: .readWrite, autoMount: false), "Don't Mount Automatically")
             policyButton(VolumePolicy(mode: .ignore, autoMount: false), "Ignore This Volume")
         }
+        if let awake = volume.keepAwake {
+            Button {
+                model.setKeepAwake(volume, !awake)
+            } label: {
+                if awake {
+                    Label("Keep Drive Awake", systemImage: "checkmark")
+                } else {
+                    Text("Keep Drive Awake")
+                }
+            }
+            .help("Don't let macOS put the drive to sleep. For drives that drop off when they wake up.")
+        }
         Divider()
         Button("Check Disk…") { openTool("check") }
         Button("Erase…") { openTool("format") }
